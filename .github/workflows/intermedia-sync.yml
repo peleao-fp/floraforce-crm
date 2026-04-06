@@ -1,0 +1,33 @@
+name: Intermedia Call Sync
+ 
+on:
+  schedule:
+    # Runs every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # Allow manual trigger for testing
+ 
+jobs:
+  sync-calls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+ 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+ 
+      - name: Install dependencies
+        run: npm install node-fetch@2
+ 
+      - name: Run call sync
+        env:
+          INTERMEDIA_CLIENT_ID:     ${{ secrets.INTERMEDIA_CLIENT_ID }}
+          INTERMEDIA_CLIENT_SECRET: ${{ secrets.INTERMEDIA_CLIENT_SECRET }}
+          INTERMEDIA_ACCOUNT_ID:    ${{ secrets.INTERMEDIA_ACCOUNT_ID }}
+          SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:     ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node sync-calls.js
+ 
