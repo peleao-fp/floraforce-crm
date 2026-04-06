@@ -24,7 +24,7 @@ async function getAccessToken() {
 
 async function getCallLogs(token) {
   const dateTo   = new Date();
-  const dateFrom = new Date(dateTo.getTime() - 2 * 60 * 60 * 1000);
+  const dateFrom = new Date(dateTo.getTime() - 24 * 60 * 60 * 1000);
   const params   = new URLSearchParams({ dateFrom: dateFrom.toISOString(), dateTo: dateTo.toISOString() });
   const url      = 'https://api.intermedia.net/analytics/calls/user?' + params.toString();
   console.log('📞 Fetching calls:', dateFrom.toISOString(), '→', dateTo.toISOString());
