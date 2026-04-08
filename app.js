@@ -75,6 +75,7 @@ async function loadApp(user) {
   setLoader('Loading activity...', 75);
   await loadLeadStates(); // also calls loadIntermedaCallCounts
   await loadCallCount();  // uses intermedia data for weekly progress
+  await loadMktTagTypes(); // preload so modal MKT Tag dropdown works
 
   setLoader('Ready!', 100);
   setTimeout(() => {
@@ -603,6 +604,25 @@ function renderOwnerDropdown(currentOwner) {
     + options.join('') + '</select></div></div>';
 }
 
+function renderMktTagDropdown(lead) {
+  const current = lead.mkt_tag || '';
+  const options = ['<option value="">— No MKT Tag —</option>']
+    .concat((mktTagTypes || []).map(t =>
+      '<option value="' + esc(t) + '"' + (t === current ? ' selected' : '') + '>' + esc(t) + '</option>'
+    ));
+  return '<div class="info-item"><div class="info-item-lbl">🏷 MKT Tag</div>'
+    + '<div class="info-item-val"><select class="edit-field edit-select" data-key="mkt_tag" onchange="updateMktTagFromModal(this)">'
+    + options.join('') + '</select></div></div>';
+}
+
+async function updateMktTagFromModal(select) {
+  if (!currentLead) return;
+  const newVal = select.value;
+  currentLead.mkt_tag = newVal;
+  await saveLeadState(currentLead);
+  showToast(newVal ? '🏷 MKT Tag "' + newVal + '" saved' : '🏷 MKT Tag removed');
+}
+
 function renderEditableFields(lead) {
   const field = (label, key, val, type) =>
     '<div class="info-item"><div class="info-item-lbl">' + label + '</div>'
@@ -615,7 +635,8 @@ function renderEditableFields(lead) {
     + renderOwnerDropdown(lead.responsible || lead.r)
     + field('Type',           'ty',          lead.ty)
     + renderPipelineDropdown(lead)
-    + '<div class="info-item"><div class="info-item-lbl">State</div><div class="info-item-val" style="font-size:11px;color:var(--text3)">' + esc(lead.st || '—') + '</div></div>';
+    + '<div class="info-item"><div class="info-item-lbl">State</div><div class="info-item-val" style="font-size:11px;color:var(--text3)">' + esc(lead.st || '—') + '</div></div>'
+    + renderMktTagDropdown(lead);
 }
 
 async function updateLeadPipeline(select) {
