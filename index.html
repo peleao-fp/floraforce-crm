@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Full Pot of Flowers — CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+/* ── EXTRA: editable fields, admin layout, light theme ── */
+.edit-field{width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;font-family:'DM Sans',sans-serif;transition:border-color .15s}
+.edit-field:focus{outline:none;border-color:var(--accent)}
+.edit-field:hover{border-color:var(--text3)}
+.edit-select{cursor:pointer;appearance:auto}
+.edit-select option{background:var(--card);color:var(--text1)}
+
+#app{display:none}
+#app.app-visible{display:grid;grid-template-columns:260px 1fr;grid-template-rows:60px 1fr;height:100vh;overflow:hidden}
+#topbar{grid-column:1/-1}
+#sidebar{grid-row:2;overflow-y:auto}
+#main{grid-column:2;grid-row:2;overflow-y:auto;display:flex;flex-direction:column}
+#admin-panel{display:none;grid-column:1/-1;grid-row:2;overflow-y:auto;flex-direction:column;gap:20px;padding:24px;width:100%}
+
+.admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%}
+.admin-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;overflow:hidden}
+.admin-card-full{grid-column:1/-1}
+.admin-card-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;margin-bottom:10px}
+.users-table{width:100%;border-collapse:collapse;font-size:12px}
+.users-table th{padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border2);letter-spacing:.8px}
+.users-table td{padding:8px 10px;border-bottom:1px solid var(--border2)}
+.role-badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
+.role-admin{background:rgba(248,113,113,.12);color:var(--danger);border:1px solid rgba(248,113,113,.2)}
+.role-vendor{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(74,222,128,.2)}
+.kanban-wrap{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;min-height:150px}
+.kanban-col{background:var(--surface2);border:1px solid var(--border2);border-radius:10px;min-width:200px;flex-shrink:0}
+.kanban-col-header{padding:10px 12px;font-size:11px;font-weight:700;color:var(--text2);border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center}
+.kanban-col-header span{background:var(--border2);color:var(--text3);border-radius:20px;padding:1px 7px;font-size:10px}
+.kanban-col-body{padding:6px;display:flex;flex-direction:column;gap:5px;min-height:80px}
+.kanban-col-body.drag-over{background:var(--accent-dim)}
+.kanban-card{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-size:12px;cursor:grab}
+.kanban-card:hover{border-color:var(--accent)}
+.kanban-card.dragging{opacity:.4}
+.kanban-card-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.kanban-card-state{font-size:10px;color:var(--text3);margin-top:2px}
+.activity-list{display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto}
+.activity-item{display:flex;gap:8px;align-items:flex-start;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:7px}
+.act-icon{font-size:13px;flex-shrink:0;margin-top:1px}
+.act-body{flex:1;font-size:11px;color:var(--text2);line-height:1.5}
+.act-body strong{color:var(--text)}
+.act-time{font-size:10px;color:var(--text3);white-space:nowrap}
+.add-user-form{display:flex;flex-direction:column;gap:8px}
+.form-row{display:flex;gap:7px}
+.form-input{flex:1;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:7px;padding:8px 10px;font-size:12px;font-family:'DM Sans',sans-serif}
+.form-input:focus{outline:none;border-color:var(--accent)}
+.form-select{background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:7px;padding:8px 10px;font-size:12px;cursor:pointer}
+
+.kpi-card.danger{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.06)}
+.kpi-card.danger .kpi-card-val{color:var(--danger)}
+.kpi-card.warn{border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.06)}
+.kpi-card.warn .kpi-card-val{color:var(--warn)}
+
+.sync-dot.syncing{background:var(--warn);animation:blink .5s infinite}
+.sync-dot.error{background:var(--danger)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+.theme-btn{background:none;border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:5px 10px;font-size:14px;cursor:pointer}
+.theme-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+[data-theme="light"]{--bg:#f0f4f1;--surface:#fff;--surface2:#e8f0ea;--border:#c8dace;--border2:#d5e5da;--text:#0f1f14;--text2:#3a5c44;--text3:#6b9478;--accent:#16a34a;--accent2:#15803d;--accent-dim:rgba(22,163,74,.12);--accent-dim2:rgba(22,163,74,.06);--shadow:0 4px 24px rgba(0,0,0,.12)}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loading-screen">
+  <div class="loader-logo">🌸 FloraForce</div>
+  <div class="loader-bar"><div class="loader-fill" id="loader-fill" style="width:10%"></div></div>
+  <div class="loader-msg" id="loader-msg">Loading...</div>
+</div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">🌸 FloraForce</div>
+    <div class="login-sub">Call Center CRM</div>
+    <div class="login-field">
+      <label>Email</label>
+      <input type="email" class="login-input" id="l-email" placeholder="your@email.com" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" class="login-input" id="l-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="login-btn" id="l-btn" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="l-err"></div>
+    <div style="text-align:center;margin-top:8px">
+      <a href="#" onclick="doForgotPassword(event)" style="color:var(--accent);font-size:12px;text-decoration:none;opacity:.8">Forgot password?</a>
+    </div>
+    <div id="l-reset-msg" style="display:none;text-align:center;font-size:12px;color:var(--accent);margin-top:8px;padding:8px;background:var(--accent-dim);border-radius:6px">
+      ✅ Check your email for a password reset link!
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="logo">🌸 FloraForce <span>CRM</span></div>
+    <div class="topbar-stats">
+      <div class="tstat"><span class="tstat-val" id="ts-total">0</span><span class="tstat-lbl">Leads</span></div>
+      <div class="tstat"><span class="tstat-val" id="ts-calls">0</span><span class="tstat-lbl">Calls</span></div>
+      <div class="tstat"><span class="tstat-val" id="ts-conv">0</span><span class="tstat-lbl">Customers</span></div>
+      <div class="tstat"><span class="tstat-val" id="ts-priority">0</span><span class="tstat-lbl">Priority</span></div>
+    </div>
+    <div class="topbar-right">
+      <span class="sync-indicator"><span class="sync-dot" id="sync-dot"></span><span id="sync-lbl">Synced</span></span>
+      <div class="user-chip"><span id="user-name">—</span>&nbsp;<span class="user-role" id="user-role">—</span></div>
+      <button class="tab-btn" id="btn-admin" style="display:none" onclick="toggleAdminView()">🛡 Admin</button>
+      <button class="tab-btn" id="btn-mkt" style="display:none" onclick="toggleMktView()">📧 MKT</button>
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">☀️</button>
+      <button class="btn-logout" onclick="doLogout()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Weekly Progress</div>
+      <div class="progress-wrap">
+        <div class="progress-label"><span id="calls-done">0 calls</span><span>Goal: 250</span></div>
+        <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
+      </div>
+    </div>
+    <hr class="sidebar-divider">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Search</div>
+      <input type="text" class="filter-input" id="search-input" placeholder="🔍 Company, contact..." oninput="applyFilters()">
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Status</div>
+      <div class="filter-chips" id="status-chips">
+        <div class="chip active" onclick="toggleStatus(this,'all')">All</div>
+        <div class="chip" onclick="toggleStatus(this,'novo')">New</div>
+        <div class="chip" onclick="toggleStatus(this,'contatado')">Contacted</div>
+        <div class="chip" onclick="toggleStatus(this,'proposta')">Proposal</div>
+        <div class="chip" onclick="toggleStatus(this,'cliente')">Customer</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Pipeline</div>
+      <select class="filter-input filter-select" id="filter-pipeline" onchange="applyFilters()"><option value="">All</option></select>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Type</div>
+      <select class="filter-input filter-select" id="filter-type" onchange="applyFilters()">
+        <option value="">All</option>
+        <option>Florist</option>
+        <option>Event Planner</option>
+        <option>Interior Designer</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">State</div>
+      <select class="filter-input filter-select" id="filter-state" onchange="applyFilters()"><option value="">All</option></select>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Special Filters</div>
+      <div class="filter-chips">
+        <div class="chip" onclick="toggleSpecial(this,'priority')">⭐ Priority</div>
+        <div class="chip" onclick="toggleSpecial(this,'has_sales')">💰 Has Sales</div>
+        <div class="chip" onclick="toggleSpecial(this,'has_phone')">📞 Has Phone</div>
+        <div class="chip" onclick="toggleSpecial(this,'no_contact')">💤 No Contact</div>
+      </div>
+    </div>
+    <hr class="sidebar-divider">
+    <div class="kpi-mini">
+      <div class="kpi-m"><div class="kpi-m-val" id="mini-shown">0</div><div class="kpi-m-lbl">Visible</div></div>
+      <div class="kpi-m"><div class="kpi-m-val" id="mini-priority">0</div><div class="kpi-m-lbl">Priority</div></div>
+      <div class="kpi-m"><div class="kpi-m-val" id="mini-clients">0</div><div class="kpi-m-lbl">Customers</div></div>
+      <div class="kpi-m"><div class="kpi-m-val" id="mini-calls">0</div><div class="kpi-m-lbl">Calls</div></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('leads',this)">📋 Leads</div>
+      <div class="tab" onclick="switchTab('dashboard',this)">📊 Dashboard</div>
+      <div class="tab" id="tab-btn-analytics" style="display:none" onclick="switchTab('analytics',this)">📈 Analytics</div>
+      <div class="tab" id="tab-btn-sales" style="display:none" onclick="switchTab('sales',this)">💰 Sales</div>
+    </div>
+
+    <div id="tab-leads">
+      <div id="leads-container">
+        <div class="leads-toolbar">
+          <span class="leads-count">Showing <strong id="lc-shown">0</strong> of <strong id="lc-total">0</strong></span>
+          <button class="btn btn-primary" style="margin-left:12px;padding:6px 14px;font-size:12px" onclick="openNewLeadModal()">➕ New Lead</button>
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost" onclick="sortBy('priority')">⭐ Priority</button>
+            <button class="btn btn-ghost" onclick="sortBy('calls')">📞 Calls</button>
+            <button class="btn btn-ghost" onclick="sortBy('company')">🔤 A-Z</button>
+            <button class="btn btn-ghost" onclick="sortBy('idle')">💤 No Contact</button>
+            <button class="btn btn-ghost" onclick="exportCSV()" title="Export leads to CSV">📥 CSV</button>
+          </div>
+        </div>
+        <div class="leads-table-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:28px">⭐</th>
+              <th>Company</th>
+              <th>State</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Tags</th>
+              <th>Calls</th>
+              <th>Last Contact</th>
+              <th>📞</th>
+            </tr></thead>
+            <tbody id="leads-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </div>
+
+    <div id="tab-dashboard" style="display:none">
+      <div id="dash-container">
+        <div class="kpi-grid" id="kpi-grid"></div>
+        <div class="chart-row" id="charts-row"></div>
+      </div>
+    </div>
+    <div id="tab-analytics" style="display:none">
+      <div id="analytics-container">
+
+        <!-- Date range controls -->
+        <div class="analytics-toolbar">
+          <div class="analytics-title">📈 Analytics</div>
+          <div class="analytics-controls">
+            <div class="date-presets">
+              <button class="preset-btn active" onclick="setPreset('7d',this)">7 days</button>
+              <button class="preset-btn" onclick="setPreset('30d',this)">30 days</button>
+              <button class="preset-btn" onclick="setPreset('90d',this)">90 days</button>
+              <button class="preset-btn" onclick="setPreset('mtd',this)">This month</button>
+              <button class="preset-btn" onclick="setPreset('custom',this)">Custom</button>
+            </div>
+            <div class="date-custom" id="date-custom" style="display:none">
+              <input type="date" id="date-from" onchange="loadAnalytics()">
+              <span style="color:var(--text3)">→</span>
+              <input type="date" id="date-to" onchange="loadAnalytics()">
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI summary -->
+        <div class="kpi-grid" id="analytics-kpis"></div>
+
+        <!-- Charts row 1: Revenue + Calls -->
+        <div class="chart-row" id="analytics-charts-1"></div>
+
+        <!-- Charts row 2: Conversion funnel + Call outcomes -->
+        <div class="chart-row" id="analytics-charts-2"></div>
+
+        <!-- Vendor performance table -->
+        <div class="analytics-card">
+          <div class="chart-title">🏆 Vendor Performance</div>
+          <div class="analytics-table-wrap">
+            <table class="analytics-table">
+              <thead><tr>
+                <th>Vendor</th>
+                <th>Leads</th>
+                <th>Calls</th>
+                <th>Avg Duration</th>
+                <th>Contacted</th>
+                <th>Converted</th>
+                <th>Conv. Rate</th>
+              </tr></thead>
+              <tbody id="vendor-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="tab-sales" style="display:none;flex:1;min-height:0;overflow:hidden">
+      <iframe
+        id="sales-pbi-iframe"
+        title="Sales Automatic Reports"
+        src="https://app.powerbi.com/reportEmbed?reportId=1de646ad-b47e-4741-b278-00ec749eed09&autoAuth=true&ctid=6a46f183-2aca-4ed1-a29d-ca98de3bc820"
+        style="width:100%;height:100%;border:none;display:block"
+        allowFullScreen="true"
+      ></iframe>
+    </div>
+  </div>
+
+
+  <!-- ADMIN PANEL -->
+  <div id="admin-panel">
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800">🛡 Admin Panel</div>
+    <div class="admin-grid">
+
+      <div class="admin-card">
+        <div class="admin-card-title">👥 Users</div>
+        <table class="users-table">
+          <thead><tr><th>Name</th><th>Role</th><th>Leads</th><th>Calls</th><th></th></tr></thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-card">
+        <div class="admin-card-title">➕ Create User</div>
+        <div class="add-user-form">
+          <input type="text"     class="form-input"  id="new-name"  placeholder="Full name">
+          <input type="email"    class="form-input"  id="new-email" placeholder="email@company.com">
+          <div class="form-row">
+            <input type="password" class="form-input"  id="new-pass"  placeholder="Initial password">
+            <select class="form-select" id="new-role">
+              <option value="vendor">Vendor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="createUser()" style="width:100%">✅ Create User</button>
+        </div>
+      </div>
+
+      <div class="admin-card admin-card-full">
+        <div class="admin-card-title">
+          🔀 Redistribute Leads — drag between vendors
+          <button class="btn btn-ghost" style="float:right;font-size:11px;padding:3px 8px" onclick="renderKanban()">↻ Refresh</button>
+        </div>
+        <div class="kanban-wrap" id="kanban-wrap"></div>
+      </div>
+
+      <div class="admin-card admin-card-full">
+        <div class="admin-card-title">📞 Recent Calls (All Vendors)</div>
+        <div class="activity-list" id="calls-list"></div>
+      </div>
+
+      <div class="admin-card admin-card-full">
+        <div class="admin-card-title">📋 Recent Activity</div>
+        <div class="activity-list" id="activity-list"></div>
+      </div>
+
+    </div>
+  </div>
+
+
+
+  <!-- MKT PANEL -->
+  <div id="mkt-panel" style="display:none;grid-column:1/-1;grid-row:2;overflow-y:auto;flex-direction:column;gap:20px;padding:24px;width:100%">
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800">📧 Email Marketing</div>
+
+    <!-- Filters -->
+    <div class="admin-card">
+      <div class="admin-card-title">🎯 Target Audience</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Pipeline</div>
+          <select class="form-select" id="mkt-filter-pipeline" onchange="refreshMktPreview()">
+            <option value="">All Pipelines</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Status</div>
+          <select class="form-select" id="mkt-filter-status" onchange="refreshMktPreview()">
+            <option value="">All Statuses</option>
+            <option value="novo">New</option>
+            <option value="contatado">Contacted</option>
+            <option value="proposta">Proposal</option>
+            <option value="cliente">Customer</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Vendor</div>
+          <select class="form-select" id="mkt-filter-vendor" onchange="refreshMktPreview()">
+            <option value="">All Vendors</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Has Email</div>
+          <select class="form-select" id="mkt-filter-email" onchange="refreshMktPreview()">
+            <option value="yes">With Email Only</option>
+            <option value="">All Leads</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview stats -->
+    <div class="admin-card">
+      <div class="admin-card-title">📊 Campaign Preview</div>
+      <div id="mkt-preview-stats" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px"></div>
+      <div id="mkt-preview-table-wrap" style="overflow-x:auto;max-height:300px;overflow-y:auto">
+        <table class="users-table">
+          <thead><tr>
+            <th>Company</th>
+            <th>Contact</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>Pipeline</th>
+            <th>Owner</th>
+          </tr></thead>
+          <tbody id="mkt-preview-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Mailchimp export -->
+    <div class="admin-card">
+      <div class="admin-card-title">🐵 Export to Mailchimp</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Audience / List</div>
+          <select class="form-select" id="mkt-audience-select" style="width:100%">
+            <option value="">Loading audiences...</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Or Create New List</div>
+          <input type="text" class="form-input" id="mkt-new-list-name" placeholder="New list name (optional)">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px">Tag (optional)</div>
+          <input type="text" class="form-input" id="mkt-tag" placeholder="e.g. FloraForce-April">
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" onclick="exportToMailchimp()" id="mkt-export-btn">
+          📤 Export to Mailchimp
+        </button>
+        <div id="mkt-export-status" style="font-size:12px;color:var(--text2)"></div>
+      </div>
+      <div id="mkt-progress-wrap" style="display:none;margin-top:12px">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:4px" id="mkt-progress-label">Exporting...</div>
+        <div style="background:var(--border2);border-radius:4px;height:6px">
+          <div id="mkt-progress-bar" style="background:var(--accent);border-radius:4px;height:6px;width:0%;transition:width .3s"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div><!-- end #app -->
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal" style="display:none" onclick="closeModalOutside(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modal-company">—</div>
+        <div class="modal-subtitle" id="modal-sub">—</div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
