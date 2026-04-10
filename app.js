@@ -83,9 +83,9 @@ async function loadApp(user) {
   await loadLeads();
 
   setLoader('Loading activity...', 75);
-  await loadLeadStates(); // also calls loadIntermedaCallCounts
-  await loadCallCount();  // uses intermedia data for weekly progress
-  await loadMktTagTypes(); // preload so modal MKT Tag dropdown works
+  await loadLeadStates(); // loads intermedia call counts into window._callsByProfile
+  await loadMktTagTypes();
+  await loadCallCount();  // must run AFTER loadLeadStates so _callsByProfile is ready
 
   setLoader('Ready!', 100);
   setTimeout(() => {
@@ -188,11 +188,18 @@ async function loadLeadStates() {
 }
 
 async function loadIntermedaCallCounts() {
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - day + 1);
+  weekStart.setHours(0, 0, 0, 0);
+
   const { data } = await sb.from('intermedia_call_log')
     .select('lead_id, called_at, user_name, direction, duration')
     .not('lead_id', 'is', null);
   if (!data) return;
-  const counts = {}, lastCall = {}, callsByIntermediaName = {};
+
+  const counts = {}, lastCall = {}, callsByIntermediaName = {}, weeklyByIntermediaName = {};
   data.forEach(c => {
     if (!c.lead_id) return;
     counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
@@ -201,13 +208,18 @@ async function loadIntermedaCallCounts() {
     }
     if (c.user_name) {
       callsByIntermediaName[c.user_name] = (callsByIntermediaName[c.user_name] || 0) + 1;
+      // Track weekly separately
+      if (new Date(c.called_at) >= weekStart) {
+        weeklyByIntermediaName[c.user_name] = (weeklyByIntermediaName[c.user_name] || 0) + 1;
+      }
     }
   });
-  // Store raw intermedia name counts for use when allUsers loads
+
   window._callsByIntermediaName = callsByIntermediaName;
-  // Build profile map — works even if allUsers is empty, uses profiles from DB
-  await buildCallsByProfile(callsByIntermediaName);
-  // Apply real call counts to leads
+  window._weeklyByIntermediaName = weeklyByIntermediaName;
+
+  await buildCallsByProfile(callsByIntermediaName, weeklyByIntermediaName);
+
   leads.forEach(l => {
     if (counts[l.id]) {
       l.cc = counts[l.id];
@@ -217,26 +229,29 @@ async function loadIntermedaCallCounts() {
   });
 }
 
-async function buildCallsByProfile(callsByIntermediaName) {
-  // Load profiles if allUsers not yet populated
+async function buildCallsByProfile(callsByIntermediaName, weeklyByIntermediaName = {}) {
   let users = allUsers;
   if (!users || users.length === 0) {
     const { data } = await sb.from('profiles').select('name, role');
     users = data || [];
   }
   window._callsByProfile = {};
+  window._weeklyCallsByProfile = {};
   users.forEach(u => {
     const pName = u.name.toLowerCase();
-    let total = 0;
+    let total = 0, weekly = 0;
     Object.entries(callsByIntermediaName).forEach(([iName, cnt]) => {
       const iLower = iName.toLowerCase();
-      const words = iLower.split(' ').filter(w => w.length > 3);
-      if (pName.includes(iLower) || iLower.includes(pName) ||
-          words.some(w => pName.includes(w))) {
+      const words = iLower.split(' ').filter(w => w.length > 2);
+      const match = pName === iLower || pName.includes(iLower) || iLower.includes(pName) ||
+        words.every(w => pName.includes(w));
+      if (match) {
         total += cnt;
+        weekly += weeklyByIntermediaName[iName] || 0;
       }
     });
     if (total > 0) window._callsByProfile[u.name] = total;
+    window._weeklyCallsByProfile[u.name] = weekly;
   });
 }
 
@@ -270,30 +285,8 @@ function getWeek() {
 
 async function loadCallCount() {
   if (!currentUser || !currentProfile) return;
-  const now = new Date();
-  const day = now.getDay() || 7;
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - day + 1);
-  weekStart.setHours(0, 0, 0, 0);
-
-  const { data } = await sb.from('intermedia_call_log')
-    .select('user_name')
-    .gte('called_at', weekStart.toISOString());
-
-  if (data) {
-    const pName = currentProfile.name.toLowerCase();
-    sessionCalls = data.filter(c => {
-      if (!c.user_name) return false;
-      const iLower = c.user_name.toLowerCase();
-      const words = pName.split(' ').filter(w => w.length > 2);
-      return pName === iLower
-        || pName.includes(iLower)
-        || iLower.includes(pName)
-        || words.every(w => iLower.includes(w));
-    }).length;
-  } else {
-    sessionCalls = 0;
-  }
+  // Use weekly counts built during loadIntermedaCallCounts
+  sessionCalls = (window._weeklyCallsByProfile || {})[currentProfile.name] || 0;
   updateProgress();
 }
 
