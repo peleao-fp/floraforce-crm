@@ -29,10 +29,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 /* ── LAYOUT ── */
 #app{display:none}
-#app.app-visible{display:grid;grid-template-columns:260px 1fr;grid-template-rows:90px 1fr;height:100vh;overflow:hidden}
+#app.app-visible{display:grid;grid-template-columns:260px 1fr;grid-template-rows:110px 1fr;height:100vh;overflow:hidden}
 
 /* ── TOPBAR ── */
-#topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 20px;position:sticky;top:0;z-index:100;height:90px;overflow:visible}
+#topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 20px;position:sticky;top:0;z-index:100;height:110px;overflow:visible}
 .logo{font-family:'Syne',sans-serif;font-weight:800;font-size:18px;color:var(--accent);letter-spacing:-.5px;white-space:nowrap;display:flex;align-items:center;gap:6px}
 .logo span{color:var(--text2);font-weight:400;font-size:12px;margin-left:6px}
 .topbar-stats{display:flex;gap:10px;margin-left:auto}
