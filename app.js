@@ -188,19 +188,26 @@ async function loadLeadStates() {
 }
 
 async function loadIntermedaCallCounts() {
+  // Get start of current week (Monday) in UTC to match Supabase
   const now = new Date();
-  const day = now.getDay() || 7;
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - day + 1);
-  weekStart.setHours(0, 0, 0, 0);
+  const day = now.getUTCDay() || 7; // 1=Mon ... 7=Sun
+  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (day - 1)));
 
-  const { data } = await sb.from('intermedia_call_log')
+  // Load ALL calls (for lead counts)
+  const { data: allData } = await sb.from('intermedia_call_log')
     .select('lead_id, called_at, user_name, direction, duration')
     .not('lead_id', 'is', null);
-  if (!data) return;
+
+  // Load THIS WEEK calls (for progress bar)
+  const { data: weekData } = await sb.from('intermedia_call_log')
+    .select('user_name')
+    .gte('called_at', weekStart.toISOString());
+
+  if (!allData) return;
 
   const counts = {}, lastCall = {}, callsByIntermediaName = {}, weeklyByIntermediaName = {};
-  data.forEach(c => {
+
+  allData.forEach(c => {
     if (!c.lead_id) return;
     counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
     if (!lastCall[c.lead_id] || c.called_at > lastCall[c.lead_id]) {
@@ -208,10 +215,13 @@ async function loadIntermedaCallCounts() {
     }
     if (c.user_name) {
       callsByIntermediaName[c.user_name] = (callsByIntermediaName[c.user_name] || 0) + 1;
-      // Track weekly separately
-      if (new Date(c.called_at) >= weekStart) {
-        weeklyByIntermediaName[c.user_name] = (weeklyByIntermediaName[c.user_name] || 0) + 1;
-      }
+    }
+  });
+
+  // Build weekly counts from separate query
+  (weekData || []).forEach(c => {
+    if (c.user_name) {
+      weeklyByIntermediaName[c.user_name] = (weeklyByIntermediaName[c.user_name] || 0) + 1;
     }
   });
 
