@@ -989,6 +989,8 @@ async function loadActivityLog() {
     + '</div>'
   ).join('');
 }
+
+//Comentario do Victor
 async function createUser() {
   const name  = document.getElementById('new-name').value.trim();
   const email = document.getElementById('new-email').value.trim();
@@ -1429,6 +1431,8 @@ async function exportToMailchimp() {
   const pool = getMktLeads().filter(l => l.em);
   if (!pool.length) { showToast('⚠️ No leads with email to export'); return; }
 
+
+  //outro comentario
   const key = await loadMcApiKey();
   if (!key) { showToast('❌ Mailchimp API key not configured'); return; }
 
