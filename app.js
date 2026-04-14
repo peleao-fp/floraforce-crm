@@ -580,12 +580,14 @@ function openModal(id) {
     + '</div></div>'
     + '<div class="modal-section"><div class="modal-section-title">📄 Notes</div><textarea class="modal-textarea" id="modal-comments" placeholder="General notes...">' + esc(lead.cm || '') + '</textarea></div>'
     + '<div class="modal-section"><div class="modal-section-title">📞 Call Log</div><div class="call-log">Total: <strong style="color:var(--accent)">' + (lead.cc || 0) + '</strong>' + (lead.lc ? ' · Last: <strong>' + new Date(lead.lc).toLocaleString('en-US') + '</strong>' : ' · None') + '</div></div>'
+    + '<div class="modal-section"><div class="modal-section-title">📄 Quotes</div><div id="modal-quotes-list"><span style="font-size:12px;color:var(--text3)">Loading...</span></div></div>'
     + '<div class="modal-section"><div class="modal-section-title">💬 Comment Timeline</div>'
     + '<div class="tl-add"><textarea id="tl-new-text" placeholder="Add comment..."></textarea><button class="btn btn-primary" style="height:60px" onclick="addTimelineEntry()">+ Add</button></div>'
     + '<div style="margin-top:12px" id="timeline-list"></div></div>';
 
   renderTagsDisplay();
   renderTimeline();
+  loadLeadQuotes(lead.id);
 
   const deleteBtn = currentProfile?.role === 'admin'
     ? '<button class="btn btn-danger" onclick="deleteLead(' + lead.id + ')" style="margin-right:auto">🗑 Delete Lead</button>'
@@ -1975,6 +1977,80 @@ function closeQuoteModal() {
   quoteItems = [];
 }
 
+async function loadLeadQuotes(leadId) {
+  const el = document.getElementById('modal-quotes-list');
+  if (!el) return;
+
+  const { data, error } = await sb.from('quotes')
+    .select('*')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: false });
+
+  if (error || !data || !data.length) {
+    el.innerHTML = '<span style="font-size:12px;color:var(--text3)">No quotes yet.</span>';
+    return;
+  }
+
+  const statusColors = { draft:'var(--text3)', sent:'var(--info)', approved:'var(--accent)', declined:'var(--danger)' };
+  const statusEmoji  = { draft:'📝', sent:'📤', approved:'✅', declined:'❌' };
+
+  el.innerHTML = data.map(q => {
+    const date = new Date(q.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    const color = statusColors[q.status] || 'var(--text3)';
+    const emoji = statusEmoji[q.status] || '📄';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">'
+      + '<div style="flex:1">'
+      + '<div style="font-size:12px;font-weight:600;color:var(--text)">' + emoji + ' $' + parseFloat(q.total || 0).toFixed(2)
+      + ' <span style="font-size:10px;color:' + color + ';font-weight:500;text-transform:uppercase">' + q.status + '</span></div>'
+      + '<div style="font-size:10px;color:var(--text3);margin-top:2px">' + date + ' · ' + esc(q.created_by_name || '—')
+      + (q.valid_until ? ' · Valid until: ' + new Date(q.valid_until).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '')
+      + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px">'
+      + '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="downloadExistingQuote(\'' + q.id + '\')">📥 PDF</button>'
+      + '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="changeQuoteStatus(\'' + q.id + '\',\'' + leadId + '\')">✏️ Status</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+async function downloadExistingQuote(quoteId) {
+  const { data: q } = await sb.from('quotes').select('*').eq('id', quoteId).single();
+  if (!q) { showToast('❌ Quote not found'); return; }
+  const lead = leads.find(l => l.id === q.lead_id);
+  generateQuotePDF(q, lead);
+}
+
+async function changeQuoteStatus(quoteId, leadId) {
+  const statuses = ['draft', 'sent', 'approved', 'declined'];
+  const { data: q } = await sb.from('quotes').select('status').eq('id', quoteId).single();
+  if (!q) return;
+
+  const currentIdx = statuses.indexOf(q.status);
+  const options = statuses.map((s, i) =>
+    '<button class="btn ' + (i === currentIdx ? 'btn-primary' : 'btn-ghost') + '" style="font-size:11px;padding:5px 12px" onclick="setQuoteStatus(\'' + quoteId + '\',\'' + s + '\',\'' + leadId + '\')">'
+    + { draft:'📝 Draft', sent:'📤 Sent', approved:'✅ Approved', declined:'❌ Declined' }[s]
+    + '</button>'
+  ).join('');
+
+  // Show inline status picker
+  const el = document.getElementById('modal-quotes-list');
+  const picker = document.createElement('div');
+  picker.id = 'quote-status-picker-' + quoteId;
+  picker.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;padding:8px;background:var(--surface2);border-radius:8px;margin-bottom:8px';
+  picker.innerHTML = options;
+  el.prepend(picker);
+}
+
+async function setQuoteStatus(quoteId, newStatus, leadId) {
+  await sb.from('quotes').update({ status: newStatus }).eq('id', quoteId);
+  showToast('✅ Status → ' + newStatus);
+  // Remove picker and reload
+  const picker = document.getElementById('quote-status-picker-' + quoteId);
+  if (picker) picker.remove();
+  loadLeadQuotes(leadId);
+}
+
 function renderQuoteModal(lead) {
   document.getElementById('quote-modal-title').textContent = '📄 New Quote';
   document.getElementById('quote-modal-sub').textContent = lead.c + (lead.cn ? ' · ' + lead.cn : '');
@@ -2152,7 +2228,10 @@ async function saveQuote() {
 
   logActivity(currentQuote.lead_id, lead?.c, 'quote_created', 'Quote $' + total.toFixed(2));
   showToast('✅ Quote saved!');
+  const savedLeadId = currentQuote.lead_id;
   closeQuoteModal();
+  // Reload quotes in modal if still open
+  loadLeadQuotes(savedLeadId);
   return data;
 }
 
