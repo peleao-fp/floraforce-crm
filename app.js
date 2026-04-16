@@ -215,45 +215,64 @@ async function loadLeadStates() {
 }
 
 async function loadIntermedaCallCounts() {
-  // Week = Sunday 00:00 UTC → next Sunday 00:00 UTC
   const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon ... 6=Sat
+  const dayOfWeek = now.getUTCDay();
   const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
   weekStart.setUTCHours(0, 0, 0, 0);
 
-  // Load THIS WEEK calls — ALL calls (no lead_id filter) for accurate vendor totals
-  const { data: weekData } = await sb.from('intermedia_call_log')
-    .select('lead_id, called_at, user_name, direction, duration')
-    .gte('called_at', weekStart.toISOString());
+  // Paginate to get ALL rows — Supabase default limit is 1000
+  const PAGE = 1000;
 
-  // Load ALL-TIME calls for lead call counts and last contact
-  const { data: allData } = await sb.from('intermedia_call_log')
-    .select('lead_id, called_at, user_name')
-    .not('lead_id', 'is', null);
+  async function fetchAllPages(buildQuery) {
+    let all = [], from = 0;
+    while (true) {
+      const { data, error } = await buildQuery(from, from + PAGE - 1);
+      if (error || !data || !data.length) break;
+      all = all.concat(data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  }
+
+  // THIS WEEK — all calls for vendor totals
+  const weekData = await fetchAllPages((from, to) =>
+    sb.from('intermedia_call_log')
+      .select('lead_id, called_at, user_name, direction, duration')
+      .gte('called_at', weekStart.toISOString())
+      .range(from, to)
+  );
+
+  // ALL-TIME — only calls with lead for lead call counts
+  const allData = await fetchAllPages((from, to) =>
+    sb.from('intermedia_call_log')
+      .select('lead_id, called_at, user_name')
+      .not('lead_id', 'is', null)
+      .range(from, to)
+  );
 
   const counts = {}, lastCall = {}, weeklyByIntermediaName = {};
 
-  // Build lead call counts from all-time data
-  (allData || []).forEach(c => {
+  allData.forEach(c => {
     counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
     if (!lastCall[c.lead_id] || c.called_at > lastCall[c.lead_id]) {
       lastCall[c.lead_id] = c.called_at;
     }
   });
 
-  // Build weekly vendor totals from ALL calls (including unmatched)
-  (weekData || []).forEach(c => {
+  weekData.forEach(c => {
     if (c.user_name) {
       weeklyByIntermediaName[c.user_name] = (weeklyByIntermediaName[c.user_name] || 0) + 1;
     }
   });
 
-  window._callsByIntermediaName  = weeklyByIntermediaName; // weekly for dashboard
+  console.log('📞 Week calls fetched:', weekData.length, '| Unique vendors:', Object.keys(weeklyByIntermediaName).length);
+
+  window._callsByIntermediaName  = weeklyByIntermediaName;
   window._weeklyByIntermediaName = weeklyByIntermediaName;
 
   await buildCallsByProfile(weeklyByIntermediaName, weeklyByIntermediaName);
 
-  // Apply lead call counts
   leads.forEach(l => {
     if (counts[l.id]) {
       l.cc = counts[l.id];
@@ -1428,11 +1447,19 @@ async function loadAnalytics() {
   const fromDate = new Date(analyticsDateFrom + 'T00:00:00');
   const toDate   = new Date(analyticsDateTo   + 'T23:59:59');
 
-  const { data: callLogs } = await sb.from('intermedia_call_log')
-    .select('*')
-    .gte('called_at', fromDate.toISOString())
-    .lte('called_at', toDate.toISOString());
-  const calls = callLogs || [];
+  // Paginate call logs — can exceed 1000 rows
+  let calls = [], callFrom = 0;
+  while (true) {
+    const { data: batch } = await sb.from('intermedia_call_log')
+      .select('*')
+      .gte('called_at', fromDate.toISOString())
+      .lte('called_at', toDate.toISOString())
+      .range(callFrom, callFrom + 999);
+    if (!batch || !batch.length) break;
+    calls = calls.concat(batch);
+    if (batch.length < 1000) break;
+    callFrom += 1000;
+  }
 
   // Apply lead filters
   let pool = leads;
