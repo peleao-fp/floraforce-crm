@@ -1683,10 +1683,10 @@ async function exportToMailchimp() {
 
       const chunk = pool.slice(i, i + CHUNK);
       const members = chunk.map(l => ({
-        email:   l.em,
+        email_address: (l.em || '').split(';')[0].toLowerCase().trim(),
         contact: l.cn || '',
         company: l.c  || ''
-      }));
+      })).filter(m => m.email_address && m.email_address.includes('@'));
 
       const data = await mcCall('batch_members', { listId, members, tag });
       done   += data.total_created || (data.new_members?.length || 0) + (data.updated_members?.length || 0);
