@@ -24,15 +24,20 @@ async function getAccessToken() {
 }
 
 async function getCallLogs(token) {
+  // Week = Sunday 00:00 UTC → next Sunday 00:00 UTC
+  const now      = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon ... 6=Sat
+  const dateFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
+  dateFrom.setUTCHours(0, 0, 0, 0);
   const dateTo   = new Date();
-  const dateFrom = new Date(dateTo.getTime() - 24 * 60 * 60 * 1000);
-  const params   = new URLSearchParams({ dateFrom: dateFrom.toISOString(), dateTo: dateTo.toISOString() });
-  const url      = 'https://api.intermedia.net/analytics/calls/user?' + params.toString();
+
+  const params = new URLSearchParams({ dateFrom: dateFrom.toISOString(), dateTo: dateTo.toISOString() });
+  const url    = 'https://api.intermedia.net/analytics/calls/user?' + params.toString();
   console.log('📞 Fetching calls:', dateFrom.toISOString(), '→', dateTo.toISOString());
   const res = await fetch(url, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: '{}'
+    body:    '{}'
   });
   if (!res.ok) throw new Error('Call logs failed: ' + res.status + ' ' + await res.text());
   const data  = await res.json();
