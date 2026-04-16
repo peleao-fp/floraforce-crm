@@ -176,7 +176,7 @@ async function loadLeads() {
     cs: 'novo', tg: [], pr: false, cc: 0,
     lc: null, cv: false, cm: '', tl: [],
     responsible: l.responsible || '',
-    mkt_tag: ''
+    mkt_tag: []
   }));
 }
 
@@ -198,7 +198,12 @@ async function loadLeadStates() {
     l.cm          = s.notes      || '';
     l.tl          = s.timeline   || [];
     l.responsible = s.responsible || l.r;
-    l.mkt_tag     = s.mkt_tag    || '';
+    l.mkt_tag = (() => {
+      const raw = s.mkt_tag;
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw;
+      try { const p = JSON.parse(raw); return Array.isArray(p) ? p : [p]; } catch(e) { return raw ? [raw] : []; }
+    })();
   });
   // Overlay real call counts from Intermedia
   await loadIntermedaCallCounts();
@@ -295,7 +300,7 @@ async function saveLeadState(lead) {
     converted:   lead.cv          || false,
     notes:       lead.cm          || '',
     timeline:    lead.tl          || [],
-    mkt_tag:     lead.mkt_tag     || null,
+    mkt_tag:     Array.isArray(lead.mkt_tag) ? JSON.stringify(lead.mkt_tag) : (lead.mkt_tag ? JSON.stringify([lead.mkt_tag]) : '[]'),
     updated_by:  currentUser?.id,
     updated_at:  new Date().toISOString()
   }, { onConflict: 'lead_id' });
@@ -320,7 +325,8 @@ async function syncToMailchimp(lead) {
           company:     lead.c  || '',
           segmentation: lead.p || '',
           crm_status:  lead.cs || '',
-          mkt_tag:     lead.mkt_tag || '',
+          mkt_tag:     Array.isArray(lead.mkt_tag) ? lead.mkt_tag.join(', ') : (lead.mkt_tag || ''),
+          mkt_tags:    Array.isArray(lead.mkt_tag) ? lead.mkt_tag : (lead.mkt_tag ? [lead.mkt_tag] : []),
         }
       })
     });
@@ -685,27 +691,63 @@ function renderOwnerDropdown(currentOwner) {
 
 async function renderMktTagDropdown(lead) {
   await loadMktTagTypes();
-  const current = lead.mkt_tag || '';
+  const current = Array.isArray(lead.mkt_tag) ? lead.mkt_tag : (lead.mkt_tag ? [lead.mkt_tag] : []);
   const canEdit = currentProfile?.role === 'admin' || hasPermission('edit_mkt_tag');
 
   if (!canEdit) {
-    return '<div class="info-item"><div class="info-item-lbl">🏷 MKT Tag</div>'
-      + '<div class="info-item-val" style="font-size:12px;color:var(--text2)">' + esc(current || '—') + '</div></div>';
+    return '<div class="info-item"><div class="info-item-lbl">🏷 MKT Tags</div>'
+      + '<div class="info-item-val" style="font-size:12px;color:var(--text2)">' + (current.length ? current.map(t => esc(t)).join(', ') : '—') + '</div></div>';
   }
 
-  const options = ['<option value="">— No MKT Tag —</option>']
-    .concat((mktTagTypes || []).map(t =>
-      '<option value="' + esc(t) + '"' + (t === current ? ' selected' : '') + '>' + esc(t) + '</option>'
-    ));
-  return '<div class="info-item"><div class="info-item-lbl">🏷 MKT Tag</div>'
-    + '<div class="info-item-val"><select class="edit-field edit-select" data-key="mkt_tag" onchange="updateMktTagFromModal(this)">'
-    + options.join('') + '</select></div></div>';
+  const chips = current.map(t =>
+    '<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-dim);color:var(--accent);border:1px solid rgba(74,222,128,.3);border-radius:20px;padding:2px 8px;font-size:11px">'
+    + esc(t)
+    + '<button onclick="removeMktTagFromLead(\'' + esc(t) + '\')" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 2px">×</button>'
+    + '</span>'
+  ).join('');
+
+  const available = (mktTagTypes || []).filter(t => !current.includes(t));
+  const addDropdown = available.length
+    ? '<select class="edit-field edit-select" onchange="addMktTagToLead(this)" style="font-size:11px;padding:3px 8px;min-width:140px">'
+      + '<option value="">+ Add tag...</option>'
+      + available.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('')
+      + '</select>'
+    : '<span style="font-size:11px;color:var(--text3)">All tags assigned</span>';
+
+  return '<div class="info-item" style="grid-column:1/-1"><div class="info-item-lbl">🏷 MKT Tags</div>'
+    + '<div class="info-item-val"><div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
+    + chips
+    + addDropdown
+    + '</div></div></div>';
+}
+
+function addMktTagToLead(sel) {
+  const tag = sel.value;
+  if (!tag || !currentLead) return;
+  sel.value = '';
+  if (!Array.isArray(currentLead.mkt_tag)) currentLead.mkt_tag = [];
+  if (!currentLead.mkt_tag.includes(tag)) {
+    currentLead.mkt_tag.push(tag);
+    // Re-render the field
+    renderEditableFields(currentLead).then(html => {
+      document.getElementById('lead-info-grid').innerHTML = html;
+    });
+  }
+}
+
+function removeMktTagFromLead(tag) {
+  if (!currentLead) return;
+  if (!Array.isArray(currentLead.mkt_tag)) currentLead.mkt_tag = [];
+  currentLead.mkt_tag = currentLead.mkt_tag.filter(t => t !== tag);
+  renderEditableFields(currentLead).then(html => {
+    document.getElementById('lead-info-grid').innerHTML = html;
+  });
 }
 
 async function updateMktTagFromModal(select) {
   if (!currentLead) return;
   const newVal = select.value;
-  currentLead.mkt_tag = newVal;
+  currentLead.mkt_tag = newVal ? [newVal] : [];
   await saveLeadState(currentLead);
   showToast(newVal ? '🏷 MKT Tag "' + newVal + '" saved' : '🏷 MKT Tag removed');
 }
@@ -1283,7 +1325,7 @@ function exportCSV() {
       l.cc || 0,
       l.lc ? new Date(l.lc).toLocaleDateString('en-US') : '',
       (l.tg || []).join('; '),
-      l.mkt_tag || ''
+      Array.isArray(l.mkt_tag) ? l.mkt_tag.join('; ') : (l.mkt_tag || '')
     ]);
   });
   const esc2 = v => '"' + String(v).replace(/"/g, '""') + '"';
@@ -1536,7 +1578,7 @@ async function refreshMktPreview() {
   if (mktSearch) {
     const s = mktSearch.toLowerCase();
     display = display.filter(l =>
-      (l.c + ' ' + l.cn + ' ' + l.em + ' ' + (l.mkt_tag||'')).toLowerCase().includes(s)
+      (l.c + ' ' + l.cn + ' ' + l.em + ' ' + (Array.isArray(l.mkt_tag) ? l.mkt_tag.join(' ') : (l.mkt_tag||''))).toLowerCase().includes(s)
     );
   }
 
@@ -1577,27 +1619,61 @@ async function refreshMktPreview() {
       )).join('');
   };
 
-  tbody.innerHTML = display.map(l =>
-    '<tr>'
-    + '<td>' + esc(l.c || '—') + '</td>'
-    + '<td>' + esc(l.cn || '—') + '</td>'
-    + '<td style="color:var(--accent)">' + esc(l.em) + '</td>'
-    + '<td><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--accent-dim);color:var(--accent)">' + esc(l.cs || '—') + '</span></td>'
-    + '<td style="font-size:11px;color:var(--text3)">' + esc((l.p||'').split(' - ').pop()||'—') + '</td>'
-    + '<td style="font-size:11px">' + esc(l.responsible || l.r || '—') + '</td>'
-    + '<td>'
-      + '<select class="mkt-tag-select" onchange="saveMktTag(' + l.id + ',this.value)">'
-      + buildTagOptions(l.mkt_tag)
-      + '</select>'
-    + '</td>'
-    + '</tr>'
-  ).join('');
+  tbody.innerHTML = display.map(l => {
+    const tags = Array.isArray(l.mkt_tag) ? l.mkt_tag : (l.mkt_tag ? [l.mkt_tag] : []);
+    const available = (mktTagTypes || []).filter(t => !tags.includes(t));
+    const tagChips = tags.map(t =>
+      '<span style="display:inline-flex;align-items:center;gap:3px;background:var(--accent-dim);color:var(--accent);border-radius:10px;padding:1px 7px;font-size:10px">'
+      + esc(t)
+      + '<button onclick="removeMktTagFromTable(' + l.id + ',\'' + esc(t) + '\')" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px;line-height:1;padding:0">×</button>'
+      + '</span>'
+    ).join('');
+    const addSelect = available.length
+      ? '<select style="background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer" onchange="addMktTagFromTable(' + l.id + ',this)">'
+        + '<option value="">+ tag</option>'
+        + available.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('')
+        + '</select>'
+      : '';
+    return '<tr>'
+      + '<td>' + esc(l.c || '—') + '</td>'
+      + '<td>' + esc(l.cn || '—') + '</td>'
+      + '<td style="color:var(--accent)">' + esc(l.em) + '</td>'
+      + '<td><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--accent-dim);color:var(--accent)">' + esc(l.cs || '—') + '</span></td>'
+      + '<td style="font-size:11px;color:var(--text3)">' + esc((l.p||'').split(' - ').pop()||'—') + '</td>'
+      + '<td style="font-size:11px">' + esc(l.responsible || l.r || '—') + '</td>'
+      + '<td><div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">' + tagChips + addSelect + '</div></td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function addMktTagFromTable(leadId, sel) {
+  const tag = sel.value;
+  if (!tag) return;
+  sel.value = '';
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+  if (!Array.isArray(lead.mkt_tag)) lead.mkt_tag = lead.mkt_tag ? [lead.mkt_tag] : [];
+  if (!lead.mkt_tag.includes(tag)) lead.mkt_tag.push(tag);
+  await saveLeadState(lead);
+  showToast('🏷 "' + tag + '" added');
+  refreshMktPreview();
+}
+
+async function removeMktTagFromTable(leadId, tag) {
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+  if (!Array.isArray(lead.mkt_tag)) lead.mkt_tag = lead.mkt_tag ? [lead.mkt_tag] : [];
+  lead.mkt_tag = lead.mkt_tag.filter(t => t !== tag);
+  await saveLeadState(lead);
+  showToast('🗑 "' + tag + '" removed');
+  refreshMktPreview();
 }
 
 async function saveMktTag(leadId, tag) {
+  // Legacy single-tag handler
   const lead = leads.find(l => l.id === leadId);
   if (!lead) return;
-  lead.mkt_tag = tag || '';
+  lead.mkt_tag = tag ? [tag] : [];
   await saveLeadState(lead);
   showToast(tag ? '🏷 Tag "' + tag + '" saved' : '🏷 Tag removed');
 }
@@ -1832,7 +1908,7 @@ async function saveNewLead() {
     ph: phone || '', sl: null, cs: 'novo', tg: [], pr: false,
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
-    mkt_tag: ''
+    mkt_tag: []
   };
   leads.push(newLead);
 
@@ -2014,9 +2090,16 @@ function parseBulkCSV(text) {
     }
 
     const csvMktTag = get(colMap.mkt_tag);
-    if (csvMktTag !== null && csvMktTag !== (lead.mkt_tag || '')) {
-      changes['mkt_tag'] = csvMktTag;
-      display.push({ label: 'MKT Tag', from: lead.mkt_tag || '—', to: csvMktTag });
+    if (csvMktTag !== null) {
+      // Support multiple tags separated by ; or ,
+      const newTags = csvMktTag ? csvMktTag.split(/[;,]/).map(t => t.trim()).filter(Boolean) : [];
+      const currentTags = Array.isArray(lead.mkt_tag) ? lead.mkt_tag : (lead.mkt_tag ? [lead.mkt_tag] : []);
+      const currentStr = JSON.stringify(currentTags.sort());
+      const newStr = JSON.stringify(newTags.sort());
+      if (currentStr !== newStr) {
+        changes['mkt_tag'] = JSON.stringify(newTags);
+        display.push({ label: 'MKT Tag', from: currentTags.join(', ') || '—', to: newTags.join(', ') || '—' });
+      }
     }
 
     if (display.length > 0) {
