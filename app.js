@@ -538,6 +538,161 @@ function applyFilters() {
   updateMiniStats();
   updateTopbarStats();
 }
+function handleLeadRowClick(event, id) {
+  // Don't open modal if clicking checkbox area
+  if (event.target.type === 'checkbox') return;
+  openModal(id);
+}
+
+let selectedLeadIds = new Set();
+
+function onLeadCheckbox(cb) {
+  const id = parseInt(cb.dataset.id);
+  if (cb.checked) selectedLeadIds.add(id);
+  else selectedLeadIds.delete(id);
+  updateBulkBar();
+}
+
+function toggleSelectAll(cb) {
+  selectedLeadIds.clear();
+  const checkboxes = document.querySelectorAll('.lead-checkbox');
+  if (cb.checked) {
+    // Select all on current page
+    checkboxes.forEach(c => {
+      c.checked = true;
+      selectedLeadIds.add(parseInt(c.dataset.id));
+    });
+  } else {
+    checkboxes.forEach(c => c.checked = false);
+  }
+  // Sync both checkboxes
+  ['select-all-leads','select-all-leads-th'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = cb.checked;
+  });
+  updateBulkBar();
+}
+
+function clearBulkSelection() {
+  selectedLeadIds.clear();
+  document.querySelectorAll('.lead-checkbox').forEach(c => c.checked = false);
+  ['select-all-leads','select-all-leads-th'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  });
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-action-bar');
+  const lbl = document.getElementById('bulk-count-label');
+  if (!bar) return;
+  if (selectedLeadIds.size > 0) {
+    bar.style.display = 'flex';
+    lbl.textContent = selectedLeadIds.size + ' lead' + (selectedLeadIds.size > 1 ? 's' : '') + ' selected';
+    updateBulkValueInput();
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function updateBulkValueInput() {
+  const action = document.getElementById('bulk-action-select')?.value;
+  const wrap   = document.getElementById('bulk-action-value');
+  if (!wrap) return;
+
+  if (!action) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+
+  if (action === 'status') {
+    wrap.innerHTML = '<select class="edit-field edit-select" id="bulk-val" style="font-size:11px;padding:3px 8px">'
+      + '<option value="novo">🔵 New</option><option value="contatado">🟡 Contacted</option>'
+      + '<option value="proposta">🟣 Proposal</option><option value="cliente">🟢 Customer</option>'
+      + '</select>';
+  } else if (action === 'segmentation') {
+    wrap.innerHTML = '<select class="edit-field edit-select" id="bulk-val" style="font-size:11px;padding:3px 8px">'
+      + segmentations.map(s => '<option value="' + esc(s) + '">' + esc(s) + '</option>').join('')
+      + '</select>';
+  } else if (action === 'owner') {
+    const vendors = allUsers.filter(u => u.role === 'vendor' || u.role === 'admin').map(u => u.name).sort();
+    wrap.innerHTML = '<select class="edit-field edit-select" id="bulk-val" style="font-size:11px;padding:3px 8px">'
+      + vendors.map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('')
+      + '</select>';
+  } else if (action === 'tag') {
+    wrap.innerHTML = '<input type="text" class="edit-field" id="bulk-val" placeholder="Tag name..." style="font-size:11px;padding:3px 8px;width:140px">';
+  } else if (action === 'mkt_tag') {
+    wrap.innerHTML = '<select class="edit-field edit-select" id="bulk-val" style="font-size:11px;padding:3px 8px">'
+      + '<option value="">— Remove tag —</option>'
+      + mktTagTypes.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('')
+      + '</select>';
+  } else if (action === 'delete') {
+    wrap.innerHTML = '<span style="font-size:11px;color:var(--danger)">⚠️ This cannot be undone</span>';
+  }
+}
+
+async function applyBulkAction() {
+  if (!currentProfile || currentProfile.role !== 'admin') {
+    showToast('⚠️ Only admins can perform bulk actions');
+    return;
+  }
+  if (!selectedLeadIds.size) { showToast('⚠️ No leads selected'); return; }
+
+  const action = document.getElementById('bulk-action-select')?.value;
+  if (!action) { showToast('⚠️ Choose an action first'); return; }
+
+  const valEl = document.getElementById('bulk-val');
+  const val   = valEl?.value;
+
+  if (action === 'delete') {
+    if (!confirm('Delete ' + selectedLeadIds.size + ' leads? This cannot be undone.')) return;
+  } else if (action !== 'tag' && !val && action !== 'mkt_tag') {
+    showToast('⚠️ Select a value first'); return;
+  }
+
+  const btn = document.querySelector('[onclick="applyBulkAction()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+
+  let done = 0;
+  const ids = [...selectedLeadIds];
+
+  for (const id of ids) {
+    const lead = leads.find(l => l.id === id);
+    if (!lead) continue;
+
+    try {
+      if (action === 'status') {
+        lead.cs = val;
+        await saveLeadState(lead);
+      } else if (action === 'segmentation') {
+        lead.p = val;
+        await sb.from('leads').update({ pipeline: val }).eq('id', id);
+        await saveLeadState(lead);
+      } else if (action === 'owner') {
+        lead.responsible = val;
+        await sb.from('leads').update({ responsible: val }).eq('id', id);
+        await saveLeadState(lead);
+      } else if (action === 'tag') {
+        if (val && !lead.tg.includes(val)) lead.tg.push(val);
+        await saveLeadState(lead);
+      } else if (action === 'mkt_tag') {
+        lead.mkt_tag = val ? [val] : [];
+        await saveLeadState(lead);
+      } else if (action === 'delete') {
+        await sb.from('lead_states').delete().eq('lead_id', id);
+        await sb.from('leads').delete().eq('id', id);
+        leads.splice(leads.findIndex(l => l.id === id), 1);
+      }
+      done++;
+    } catch(e) { console.error('Bulk error on lead', id, e); }
+  }
+
+  logActivity(null, null, 'field_edit', 'Bulk ' + action + ' on ' + done + ' leads');
+  showToast('✅ ' + done + ' leads updated');
+  clearBulkSelection();
+  if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
+  applyFilters();
+}
+
 function sortBy(m) { sortMode = m; applyFilters(); }
 
 // ── TABLE ─────────────────────────────────────────────────────
@@ -553,12 +708,13 @@ function renderTable() {
   }
   tbody.innerHTML = page.map(l => {
     const tags    = (l.tg || []).slice(0,2).map(t => '<span class="tag-pill">' + esc(t) + '</span>').join('');
-    const sales   = ''; // Sales data removed (CSV import not current)
+    const sales   = '';
     const st      = l.st ? (l.st.split(' - ')[1] || l.st) : '—';
     const callBtn = l.ph
       ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
       : '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;opacity:.3" disabled>📞</button>';
-    return '<tr class="' + (l.pr ? 'priority-row' : '') + '" onclick="openModal(' + l.id + ')">'
+    return '<tr class="' + (l.pr ? 'priority-row' : '') + '" onclick="handleLeadRowClick(event,' + l.id + ')">'
+      + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
       + '<td class="td-company">' + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
       + '<td style="font-size:11px">' + st + '</td>'
@@ -1045,7 +1201,10 @@ function renderUsersTable() {
     + '</td>'
     + '<td style="color:var(--accent);font-weight:600">' + (lpu[u.name]||0) + '</td>'
     + '<td style="color:#34d399;font-weight:600" title="Calls this week">📞 ' + (cpu[u.name]||0) + ' <span style="font-size:9px;color:var(--text3);font-weight:400">wk</span></td>'
-    + '<td><button onclick="deleteUser(\'' + u.id + '\',\'' + esc(u.name) + '\')" style="background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" title="Delete user">🗑</button></td></tr>'
+    + '<td style="display:flex;gap:4px">'
+    + '<button onclick="openEditUserModal(\'' + u.id + '\')" style="background:none;border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" title="Edit user">✏️</button>'
+    + '<button onclick="deleteUser(\'' + u.id + '\',\'' + esc(u.name) + '\')" style="background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" title="Delete user">🗑</button>'
+    + '</td></tr>'
   ).join('');
 }
 
@@ -1961,6 +2120,80 @@ async function saveNewLead() {
   showToast('✅ Lead created: ' + company);
 }
 
+function openEditUserModal(userId) {
+  const user = allUsers.find(u => u.id === userId);
+  if (!user) return;
+
+  document.getElementById('modal-company').textContent = '✏️ Edit User';
+  document.getElementById('modal-sub').textContent = user.email || user.name;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="modal-section">
+      <div class="modal-section-title">👤 User Information</div>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-item-lbl">Full Name</div>
+          <div class="info-item-val"><input type="text" class="edit-field" id="edit-user-name" value="${esc(user.name || '')}" placeholder="Full name..."></div>
+        </div>
+        <div class="info-item">
+          <div class="info-item-lbl">Role</div>
+          <div class="info-item-val">
+            <select class="edit-field edit-select" id="edit-user-role">
+              ${['vendor','admin','mkt'].map(r => `<option value="${r}" ${user.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-section">
+      <div class="modal-section-title">🔑 Reset Password (optional)</div>
+      <div class="info-grid">
+        <div class="info-item" style="grid-column:1/-1">
+          <div class="info-item-lbl">New Password</div>
+          <div class="info-item-val"><input type="password" class="edit-field" id="edit-user-pass" placeholder="Leave blank to keep current password..."></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveEditUser('${userId}')">💾 Save Changes</button>`;
+
+  document.getElementById('modal').style.display = 'flex';
+}
+
+async function saveEditUser(userId) {
+  const user    = allUsers.find(u => u.id === userId);
+  if (!user) return;
+  const newName = document.getElementById('edit-user-name').value.trim();
+  const newRole = document.getElementById('edit-user-role').value;
+  const newPass = document.getElementById('edit-user-pass').value;
+
+  if (!newName) { showToast('⚠️ Name is required'); return; }
+
+  // Update profile
+  const { error } = await sb.from('profiles')
+    .update({ name: newName, role: newRole })
+    .eq('id', userId);
+  if (error) { showToast('❌ Error: ' + error.message); return; }
+
+  // Update password if provided
+  if (newPass) {
+    const { error: passErr } = await sb.auth.admin
+      ? await sb.auth.admin.updateUserById(userId, { password: newPass })
+      : { error: { message: 'Password reset requires admin API' } };
+    if (passErr) showToast('⚠️ Profile saved but password update failed: ' + passErr.message);
+  }
+
+  // Update local state
+  user.name = newName;
+  user.role = newRole;
+
+  showToast('✅ User "' + newName + '" updated');
+  logActivity(null, null, 'field_edit', 'Edited user: ' + newName + ' (' + newRole + ')');
+  closeModal();
+  await loadAdminData();
+}
+
 // ── DELETE USER ────────────────────────────────────────────────
 async function deleteUser(userId, userName) {
   if (currentUser?.id === userId) {
@@ -2765,8 +2998,11 @@ function generateQuotePDF(quote, lead) {
     total: quote.total || 0
   };
 
-  const statusColors = { draft: '#9db8a4', sent: '#60a5fa', approved: '#4ade80', declined: '#f87171' };
+  const statusColors = { draft: '#9db8a4', sent: '#2563eb', approved: '#16a34a', declined: '#dc2626' };
   const statusColor = statusColors[quote.status] || '#9db8a4';
+  const quoteDate = new Date(quote.created_at || Date.now());
+  const quoteDateStr = quoteDate.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+  const dayStr = quoteDate.toLocaleDateString('en-US', { weekday:'long' });
 
   const html = `<!DOCTYPE html>
 <html>
@@ -2775,99 +3011,149 @@ function generateQuotePDF(quote, lead) {
 <title>Quote — ${esc(lead?.c || '')}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a2e1f; background: #fff; padding: 40px; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 3px solid #4ade80; }
-  .logo { font-size: 28px; font-weight: 800; color: #16a34a; }
-  .logo span { color: #f472b6; }
-  .quote-meta { text-align: right; }
-  .quote-num { font-size: 20px; font-weight: 700; color: #1a2e1f; }
-  .quote-date { font-size: 12px; color: #6b9478; margin-top: 4px; }
-  .status-badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; background: ${statusColor}22; color: ${statusColor}; border: 1px solid ${statusColor}44; margin-top: 6px; }
-  .section { margin-bottom: 32px; }
-  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6b9478; margin-bottom: 10px; }
-  .client-box { background: #f0f9f4; border: 1px solid #c8dace; border-radius: 8px; padding: 14px 18px; }
-  .client-name { font-size: 16px; font-weight: 700; color: #1a2e1f; }
-  .client-detail { font-size: 12px; color: #6b9478; margin-top: 3px; }
-  table { width: 100%; border-collapse: collapse; }
-  thead th { padding: 10px 12px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: #6b9478; border-bottom: 2px solid #c8dace; }
-  thead th:last-child, thead th:nth-child(2), thead th:nth-child(3), thead th:nth-child(4) { text-align: right; }
-  tbody td { padding: 10px 12px; border-bottom: 1px solid #e8f5ec; font-size: 13px; }
+  body { font-family: Arial, sans-serif; color: #111; background: #fff; padding: 32px; font-size: 13px; }
+
+  /* ── HEADER ── */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .header-logo img { height: 90px; width: auto; }
+  .header-company { border: 2px solid #111; padding: 10px 16px; text-align: center; min-width: 300px; }
+  .header-company .doc-title { font-size: 18px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+  .header-company .co-name { font-size: 14px; font-weight: 700; }
+  .header-company .co-addr { font-size: 11px; margin-top: 2px; }
+  .header-company .co-phone { font-size: 11px; margin-top: 4px; }
+  .header-company .co-fax { font-size: 11px; }
+  .header-company .page-info { font-size: 11px; margin-top: 6px; display: flex; justify-content: space-between; }
+
+  /* ── DATE BAR ── */
+  .date-bar { display: flex; gap: 32px; align-items: center; padding: 8px 0; border-bottom: 2px solid #111; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+
+  /* ── BILL TO ── */
+  .bill-section { display: flex; gap: 16px; margin-bottom: 12px; }
+  .bill-box { border: 1px solid #999; padding: 10px 14px; flex: 1; min-height: 100px; }
+  .bill-box .bill-label { font-size: 11px; color: #555; margin-bottom: 4px; }
+  .bill-box .bill-name { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .bill-box .bill-detail { font-size: 11px; color: #444; margin-top: 2px; }
+
+  /* ── VENDOR ROW ── */
+  .vendor-row { display: flex; gap: 24px; padding: 6px 0; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; margin-bottom: 16px; font-size: 12px; }
+  .vendor-row span { color: #555; }
+  .vendor-row strong { color: #111; }
+
+  /* ── STATUS ── */
+  .status-badge { display: inline-block; padding: 3px 14px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; background: ${statusColor}22; color: ${statusColor}; border: 1px solid ${statusColor}66; }
+
+  /* ── TABLE ── */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  thead th { padding: 8px 10px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; background: #f0f0f0; border: 1px solid #ccc; }
+  thead th:nth-child(2), thead th:nth-child(3), thead th:nth-child(4), thead th:nth-child(5) { text-align: right; }
+  tbody td { padding: 8px 10px; border: 1px solid #ddd; font-size: 12px; }
   tbody td:nth-child(2), tbody td:nth-child(3), tbody td:nth-child(4) { text-align: right; }
-  tbody td:last-child { text-align: right; font-weight: 600; color: #16a34a; }
-  .totals { margin-top: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-  .total-row { display: flex; gap: 32px; font-size: 13px; }
-  .total-row.final { font-size: 18px; font-weight: 800; color: #16a34a; padding-top: 8px; border-top: 2px solid #4ade80; }
-  .total-label { color: #6b9478; }
-  .notes-box { background: #f0f9f4; border-left: 4px solid #4ade80; padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 12px; color: #3a5c44; line-height: 1.6; }
-  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #c8dace; display: flex; justify-content: space-between; font-size: 11px; color: #9db8a4; }
-  .valid { font-size: 12px; color: #f59e0b; font-weight: 600; }
+  tbody td:nth-child(5) { text-align: right; font-weight: 600; }
+
+  /* ── TOTALS ── */
+  .totals { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-bottom: 24px; }
+  .total-row { display: flex; gap: 40px; font-size: 13px; }
+  .total-row.final { font-size: 16px; font-weight: 800; padding-top: 6px; border-top: 2px solid #111; }
+  .total-label { color: #555; min-width: 120px; text-align: right; }
+
+  /* ── NOTES ── */
+  .notes-box { border-left: 4px solid #16a34a; padding: 10px 14px; background: #f9fdf9; font-size: 12px; color: #333; line-height: 1.6; margin-bottom: 24px; }
+
+  /* ── FOOTER ── */
+  .footer { border-top: 1px solid #ccc; padding-top: 12px; display: flex; justify-content: space-between; font-size: 11px; color: #888; }
 </style>
 </head>
 <body>
+
+  <!-- HEADER -->
   <div class="header">
-    <div>
-      <div class="logo"><span>Flora</span>Force</div>
-      <div style="font-size:11px;color:#6b9478;margin-top:4px">Full Pot of Flowers · info@fullpot.com</div>
+    <div class="header-logo">
+      <img src="https://peleao-fp.github.io/floraforce-crm/assets/LOGO-FF-ESCURO.png" alt="Full Pot of Flowers">
     </div>
-    <div class="quote-meta">
-      <div class="quote-num">QUOTE #${quote.id?.substring(0,8).toUpperCase()}</div>
-      <div class="quote-date">Date: ${new Date(quote.created_at || Date.now()).toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'})}</div>
-      ${quote.valid_until ? '<div class="valid">Valid until: ' + new Date(quote.valid_until).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) + '</div>' : ''}
-      <div><span class="status-badge">${quote.status}</span></div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Bill To</div>
-    <div class="client-box">
-      <div class="client-name">${esc(lead?.c || '—')}</div>
-      ${lead?.cn ? '<div class="client-detail">Contact: ' + esc(lead.cn) + '</div>' : ''}
-      ${lead?.em ? '<div class="client-detail">Email: ' + esc(lead.em) + '</div>' : ''}
-      ${lead?.ph ? '<div class="client-detail">Phone: ' + esc(lead.ph) + '</div>' : ''}
+    <div class="header-company">
+      <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: _________</div>
+      <div class="co-name">FULL POT OF FLOWERS</div>
+      <div class="co-addr">1516 SW 13 CT</div>
+      <div class="co-addr">POMPANO BEACH, FL 33069</div>
+      <div class="co-phone">PHONE: (954) 568-4467 &nbsp;&nbsp; FAX: (954) 568-4463</div>
+      <div class="co-fax">Account Receivable Fax: (954) 568-4463</div>
+      <div class="page-info"><span>Page 1</span><span>${quoteDateStr}</span></div>
     </div>
   </div>
 
-  <div class="section">
-    <div class="section-title">Items</div>
-    <table>
-      <thead>
+  <!-- DATE BAR -->
+  <div class="date-bar">
+    <span>${quoteDateStr}</span>
+    <span>${dayStr}</span>
+    ${quote.valid_until ? '<span>Valid Until: <strong>' + new Date(quote.valid_until).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) + '</strong></span>' : ''}
+    <span><span class="status-badge">${quote.status.toUpperCase()}</span></span>
+  </div>
+
+  <!-- BILL TO -->
+  <div class="bill-section">
+    <div class="bill-box">
+      <div class="bill-label">Bill to:</div>
+      <div class="bill-name">${esc(lead?.c || '—')}</div>
+      ${lead?.cn ? '<div class="bill-detail">Contact: ' + esc(lead.cn) + '</div>' : ''}
+      ${lead?.em ? '<div class="bill-detail">Email: ' + esc(lead.em) + '</div>' : ''}
+      ${lead?.ph ? '<div class="bill-detail">Phone: ' + esc(lead.ph) + '</div>' : ''}
+    </div>
+    <div class="bill-box">
+      <div class="bill-label">Ship to:</div>
+      <div class="bill-name">${esc(lead?.c || '—')}</div>
+      ${lead?.em ? '<div class="bill-detail">Email: ' + esc(lead.em) + '</div>' : ''}
+      ${lead?.ph ? '<div class="bill-detail">Phone: ' + esc(lead.ph) + '</div>' : ''}
+    </div>
+  </div>
+
+  <!-- VENDOR ROW -->
+  <div class="vendor-row">
+    <div><span>Sales Rep: </span><strong>${esc(quote.created_by_name || '—')}</strong></div>
+    <div><span>Date: </span><strong>${quoteDateStr}</strong></div>
+    <div><span>Quote #: </span><strong>${quote.id?.substring(0,8).toUpperCase()}</strong></div>
+  </div>
+
+  <!-- ITEMS TABLE -->
+  <table>
+    <thead>
+      <tr>
+        <th>Product / Description</th>
+        <th>Qty</th>
+        <th>Unit</th>
+        <th>Unit Price</th>
+        <th>Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${(quote.items || []).map(item => `
         <tr>
-          <th>Product / Description</th>
-          <th>Qty</th>
-          <th>Unit</th>
-          <th>Unit Price</th>
-          <th>Subtotal</th>
+          <td>${esc(item.name || '—')}</td>
+          <td style="text-align:right">${item.qty}</td>
+          <td style="text-align:right">${esc(item.unit || 'unit')}</td>
+          <td style="text-align:right">$${parseFloat(item.price || 0).toFixed(2)}</td>
+          <td style="text-align:right">$${parseFloat(item.subtotal || 0).toFixed(2)}</td>
         </tr>
-      </thead>
-      <tbody>
-        ${(quote.items || []).map(item => `
-          <tr>
-            <td>${esc(item.name || '—')}</td>
-            <td>${item.qty}</td>
-            <td>${esc(item.unit || 'unit')}</td>
-            <td>$${parseFloat(item.price || 0).toFixed(2)}</td>
-            <td>$${parseFloat(item.subtotal || 0).toFixed(2)}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-    <div class="totals">
-      <div class="total-row"><span class="total-label">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-      ${discount > 0 ? '<div class="total-row"><span class="total-label">Discount (' + discount + '%)</span><span>-$' + (subtotal * discount / 100).toFixed(2) + '</span></div>' : ''}
-      <div class="total-row final"><span class="total-label">Total</span><span>$${total.toFixed(2)}</span></div>
-    </div>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <!-- TOTALS -->
+  <div class="totals">
+    <div class="total-row"><span class="total-label">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+    ${discount > 0 ? '<div class="total-row"><span class="total-label">Discount (' + discount + '%)</span><span>-$' + (subtotal * discount / 100).toFixed(2) + '</span></div>' : ''}
+    <div class="total-row final"><span class="total-label">TOTAL</span><span>$${total.toFixed(2)}</span></div>
   </div>
 
   ${quote.notes ? `
-  <div class="section">
-    <div class="section-title">Notes</div>
-    <div class="notes-box">${esc(quote.notes).replace(/\n/g,'<br>')}</div>
-  </div>` : ''}
+  <div class="notes-box">${esc(quote.notes).replace(/\n/g,'<br>')}</div>` : ''}
 
+  <!-- FOOTER -->
   <div class="footer">
-    <span>Prepared by: ${esc(quote.created_by_name || '—')}</span>
-    <span>Full Pot of Flowers · fullpot.com</span>
+    <span>Prepared by: <strong>${esc(quote.created_by_name || '—')}</strong></span>
+    <span>Full Pot of Flowers · (954) 568-4467 · fullpot.com</span>
+    <span>info@fullpot.com</span>
   </div>
+
 </body>
 </html>`;
 
