@@ -64,7 +64,7 @@
 <!-- LOADING -->
 <div id="loading-screen">
   <div class="loader-logo">
-    <img src="https://peleao-fp.github.io/floraforce-crm/assets/LOGO-FF-CLARO.png" alt="FloraForce" style="height:160px;width:auto;object-fit:contain;mix-blend-mode:screen">
+    <img src="https://peleao-fp.github.io/floraforce-crm/assets/LOGO-FF-CLARO.png" alt="FloraForce" style="height:280px;width:auto;object-fit:contain;mix-blend-mode:screen">
   </div>
   <div class="loader-bar"><div class="loader-fill" id="loader-fill" style="width:10%"></div></div>
   <div class="loader-msg" id="loader-msg">Loading...</div>
@@ -196,8 +196,25 @@
     <div id="tab-leads">
       <div id="leads-container">
         <div class="leads-toolbar">
-          <span class="leads-count">Showing <strong id="lc-shown">0</strong> of <strong id="lc-total">0</strong></span>
+          <input type="checkbox" id="select-all-leads" onchange="toggleSelectAll(this)" style="cursor:pointer;width:16px;height:16px" title="Select all">
+          <span class="leads-count" style="margin-left:6px">Showing <strong id="lc-shown">0</strong> of <strong id="lc-total">0</strong></span>
           <button class="btn btn-primary" style="margin-left:12px;padding:6px 14px;font-size:12px" onclick="openNewLeadModal()">➕ New Lead</button>
+          <!-- Bulk action bar (hidden until selection) -->
+          <div id="bulk-action-bar" style="display:none;align-items:center;gap:8px;margin-left:12px;padding:4px 12px;background:var(--accent-dim);border:1px solid rgba(74,222,128,.3);border-radius:8px">
+            <span id="bulk-count-label" style="font-size:12px;color:var(--accent);font-weight:600"></span>
+            <select id="bulk-action-select" class="edit-field edit-select" style="font-size:11px;padding:3px 8px;min-width:160px" onchange="updateBulkValueInput()">
+              <option value="">— Choose action —</option>
+              <option value="status">Change Status</option>
+              <option value="segmentation">Change Segmentation</option>
+              <option value="owner">Change Owner</option>
+              <option value="tag">Add Tag</option>
+              <option value="mkt_tag">Set MKT Tag</option>
+              <option value="delete">🗑 Delete</option>
+            </select>
+            <div id="bulk-action-value" style="display:none"></div>
+            <button class="btn btn-primary" onclick="applyBulkAction()" style="padding:4px 12px;font-size:11px">Apply</button>
+            <button class="btn btn-ghost" onclick="clearBulkSelection()" style="padding:4px 10px;font-size:11px">✕ Clear</button>
+          </div>
           <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-ghost" onclick="sortBy('priority')">⭐ Priority</button>
             <button class="btn btn-ghost" onclick="sortBy('calls')">📞 Calls</button>
@@ -209,6 +226,7 @@
         <div class="leads-table-wrap">
           <table>
             <thead><tr>
+              <th style="width:28px"><input type="checkbox" id="select-all-leads-th" onchange="toggleSelectAll(this)" style="cursor:pointer"></th>
               <th style="width:28px">⭐</th>
               <th>Company</th>
               <th>State</th>
