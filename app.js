@@ -1682,13 +1682,21 @@ async function exportToMailchimp() {
       }
 
       const chunk = pool.slice(i, i + CHUNK);
-      const members = chunk.map(l => ({
-        email_address: (l.em || '').split(';')[0].toLowerCase().trim(),
-        contact: l.cn || '',
-        company: l.c  || ''
-      })).filter(m => m.email_address && m.email_address.includes('@'));
+      // Build fully mapped payload here — edge function passes it directly to Mailchimp
+      const members = chunk
+        .map(l => ({
+          email_address: (l.em || '').split(';')[0].toLowerCase().trim(),
+          status: 'subscribed',
+          status_if_new: 'subscribed',
+          merge_fields: {
+            FNAME: (l.cn || '').split(' ')[0] || '',
+            LNAME: (l.cn || '').split(' ').slice(1).join(' ') || '',
+            COMPANY: l.c || ''
+          }
+        }))
+        .filter(m => m.email_address && m.email_address.includes('@'));
 
-      const data = await mcCall('batch_members', { listId, members, tag });
+      const data = await mcCall('batch_members_direct', { listId, members, tag });
       done   += data.total_created || (data.new_members?.length || 0) + (data.updated_members?.length || 0);
       errors += data.error_count || 0;
 
