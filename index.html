@@ -42,6 +42,11 @@
 .perm-toggle input:checked + .perm-toggle-slider{background:var(--accent)}
 .perm-toggle input:checked + .perm-toggle-slider::before{transform:translateX(16px)}
 
+/* Mailchimp engagement highlight */
+tr.mc-engaged { background: rgba(234,179,8,.08) !important; border-left: 3px solid var(--warn); }
+tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
+.mc-badge { display:inline-flex;align-items:center;gap:3px;background:rgba(234,179,8,.15);color:#ca8a04;border:1px solid rgba(234,179,8,.3);border-radius:10px;padding:1px 6px;font-size:9px;font-weight:700 }
+
 /* MKT panel specific */
 .mkt-preview-table-wrap{overflow-x:auto;overflow-y:auto;max-height:600px;border:1px solid var(--border2);border-radius:8px;margin-top:4px}
 .mkt-tag-select{background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:3px 7px;font-size:11px;cursor:pointer;min-width:110px}
@@ -269,6 +274,33 @@
               <input type="date" id="date-to" onchange="loadAnalytics()">
             </div>
           </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:center">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px">Vendor</span>
+              <select class="filter-input filter-select" id="analytics-filter-vendor" onchange="loadAnalytics()" style="min-width:160px">
+                <option value="">All Vendors</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px">Segmentation</span>
+              <select class="filter-input filter-select" id="analytics-filter-seg" onchange="loadAnalytics()" style="min-width:160px">
+                <option value="">All Segmentations</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px">Status</span>
+              <select class="filter-input filter-select" id="analytics-filter-status" onchange="loadAnalytics()" style="min-width:140px">
+                <option value="">All Statuses</option>
+                <option value="novo">New</option>
+                <option value="contatado">Contacted</option>
+                <option value="proposta">Proposal</option>
+                <option value="cliente">Customer</option>
+              </select>
+            </div>
+            <div style="align-self:flex-end">
+              <button class="btn btn-ghost" onclick="resetAnalyticsFilters()" style="font-size:11px;padding:5px 10px">↺ Reset</button>
+            </div>
+          </div>
         </div>
 
         <div class="kpi-grid" id="analytics-kpis"></div>
@@ -486,7 +518,9 @@
 
     <!-- Mailchimp Settings -->
     <div class="admin-card">
-      <div class="admin-card-title">⚙️ Mailchimp Settings</div>
+      <div class="admin-card-title">⚙️ Mailchimp Settings
+        <button class="btn btn-ghost" style="float:right;font-size:11px;padding:3px 10px" onclick="syncMailchimpEngagement().then(()=>showToast('✅ Engagement synced!'))">🔄 Sync Engagement</button>
+      </div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.6">
         Configure which Mailchimp lists receive contacts. The <strong style="color:var(--text2)">Main List</strong> gets all leads with email. Each <strong style="color:var(--text2)">MKT Tag</strong> can have its own list for targeted campaigns.
       </div>
