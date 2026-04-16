@@ -2,8 +2,8 @@
 // Saves ALL calls (matched and unmatched) for full vendor call counting
 const fetch = require('node-fetch');
 
-const INTERMEDIA_CLIENT_ID     = process.env.INTERMEDIA_CLIENT_ID;
-const INTERMEDIA_CLIENT_SECRET = process.env.INTERMEDIA_CLIENT_SECRET;
+const INTERMEDIA_CLIENT_ID     = process.env.INTERMEDIA_CLIENT_ID     || '3jkwpsxZR04flEYCQUw';
+const INTERMEDIA_CLIENT_SECRET = process.env.INTERMEDIA_CLIENT_SECRET || '1O72RhtUj31g6BuRFJ66STJqePdjovTECDUrU8jq3EU';
 const SUPABASE_URL             = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY     = process.env.SUPABASE_SERVICE_KEY;
 
@@ -24,25 +24,32 @@ async function getAccessToken() {
 }
 
 async function getCallLogs(token) {
-  // Week = Sunday 00:00 UTC → next Sunday 00:00 UTC
-  const now      = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon ... 6=Sat
-  const dateFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
+  // Week = Sunday 00:00 UTC → now
+  const now       = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0=Sun
+  const dateFrom  = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
   dateFrom.setUTCHours(0, 0, 0, 0);
-  const dateTo   = new Date();
 
-  const params = new URLSearchParams({ dateFrom: dateFrom.toISOString(), dateTo: dateTo.toISOString() });
-  const url    = 'https://api.intermedia.net/analytics/calls/user?' + params.toString();
-  console.log('📞 Fetching calls:', dateFrom.toISOString(), '→', dateTo.toISOString());
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body:    '{}'
+  const params = new URLSearchParams({
+    dateFrom: dateFrom.toISOString(),
+    dateTo:   now.toISOString()
   });
+
+  const url = 'https://api.intermedia.net/analytics/usageHistory?' + params.toString();
+  console.log('📞 Fetching calls:', dateFrom.toISOString(), '→', now.toISOString());
+
+  const res = await fetch(url, {
+    method:  'GET',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+  });
+
   if (!res.ok) throw new Error('Call logs failed: ' + res.status + ' ' + await res.text());
   const data  = await res.json();
   const calls = data.calls || data.items || data.records || data.data || data.results || (Array.isArray(data) ? data : []);
   console.log('📞 Retrieved', calls.length, 'calls');
+  if (calls.length > 0) {
+    console.log('  Sample call:', JSON.stringify(calls[0]).substring(0, 250));
+  }
   return calls;
 }
 
