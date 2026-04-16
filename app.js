@@ -210,48 +210,44 @@ async function loadLeadStates() {
 }
 
 async function loadIntermedaCallCounts() {
-  // Get start of current week (Monday) in UTC to match Supabase
+  // Get start of current week (Monday) in UTC
   const now = new Date();
-  const day = now.getUTCDay() || 7; // 1=Mon ... 7=Sun
+  const day = now.getUTCDay() || 7;
   const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (day - 1)));
 
-  // Load ALL calls (for lead counts)
-  const { data: allData } = await sb.from('intermedia_call_log')
-    .select('lead_id, called_at, user_name, direction, duration')
-    .not('lead_id', 'is', null);
-
-  // Load THIS WEEK calls (for progress bar)
+  // Load THIS WEEK calls — ALL calls (no lead_id filter) for accurate vendor totals
   const { data: weekData } = await sb.from('intermedia_call_log')
-    .select('user_name')
+    .select('lead_id, called_at, user_name, direction, duration')
     .gte('called_at', weekStart.toISOString());
 
-  if (!allData) return;
+  // Load ALL-TIME calls for lead call counts and last contact
+  const { data: allData } = await sb.from('intermedia_call_log')
+    .select('lead_id, called_at, user_name')
+    .not('lead_id', 'is', null);
 
-  const counts = {}, lastCall = {}, callsByIntermediaName = {}, weeklyByIntermediaName = {};
+  const counts = {}, lastCall = {}, weeklyByIntermediaName = {};
 
-  allData.forEach(c => {
-    if (!c.lead_id) return;
+  // Build lead call counts from all-time data
+  (allData || []).forEach(c => {
     counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
     if (!lastCall[c.lead_id] || c.called_at > lastCall[c.lead_id]) {
       lastCall[c.lead_id] = c.called_at;
     }
-    if (c.user_name) {
-      callsByIntermediaName[c.user_name] = (callsByIntermediaName[c.user_name] || 0) + 1;
-    }
   });
 
-  // Build weekly counts from separate query
+  // Build weekly vendor totals from ALL calls (including unmatched)
   (weekData || []).forEach(c => {
     if (c.user_name) {
       weeklyByIntermediaName[c.user_name] = (weeklyByIntermediaName[c.user_name] || 0) + 1;
     }
   });
 
-  window._callsByIntermediaName = callsByIntermediaName;
+  window._callsByIntermediaName  = weeklyByIntermediaName; // weekly for dashboard
   window._weeklyByIntermediaName = weeklyByIntermediaName;
 
-  await buildCallsByProfile(callsByIntermediaName, weeklyByIntermediaName);
+  await buildCallsByProfile(weeklyByIntermediaName, weeklyByIntermediaName);
 
+  // Apply lead call counts
   leads.forEach(l => {
     if (counts[l.id]) {
       l.cc = counts[l.id];
@@ -971,7 +967,7 @@ function renderDashboard() {
       + '<div class="bar-val">' + v + '</div></div>'
     ).join('') + '</div></div>'
     + (callsE.length
-      ? '<div class="chart-card"><div class="chart-title">📞 Calls by Vendor</div><div class="bar-chart">'
+      ? '<div class="chart-card"><div class="chart-title">📞 Calls by Vendor — This Week</div><div class="bar-chart">'
         + callsE.map(([r,v]) =>
           '<div class="bar-row"><div class="bar-label">' + esc(r||'—') + '</div>'
           + '<div class="bar-track"><div class="bar-fill" style="width:' + (v/maxCalls*100).toFixed(0) + '%;background:linear-gradient(90deg,#34d399,#6ee7b7)"></div></div>'
@@ -1024,7 +1020,7 @@ function renderUsersTable() {
       + '</select>'
     + '</td>'
     + '<td style="color:var(--accent);font-weight:600">' + (lpu[u.name]||0) + '</td>'
-    + '<td style="color:#34d399;font-weight:600">📞 ' + (cpu[u.name]||0) + '</td>'
+    + '<td style="color:#34d399;font-weight:600" title="Calls this week">📞 ' + (cpu[u.name]||0) + ' <span style="font-size:9px;color:var(--text3);font-weight:400">wk</span></td>'
     + '<td><button onclick="deleteUser(\'' + u.id + '\',\'' + esc(u.name) + '\')" style="background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" title="Delete user">🗑</button></td></tr>'
   ).join('');
 }
@@ -1079,24 +1075,47 @@ async function loadCallsLog() {
   const { data } = await sb.from('intermedia_call_log')
     .select('*')
     .order('called_at', { ascending: false })
-    .limit(50);
+    .limit(200);
   if (!data || !data.length) {
     el.innerHTML = '<div style="color:var(--text3);padding:20px;text-align:center">No calls synced yet</div>';
     return;
   }
   const leadMap = {};
-  leads.forEach(l => { leadMap[l.id] = l.c; });
+  leads.forEach(l => { leadMap[l.id] = l; });
+
   el.innerHTML = data.map(c => {
-    const emoji     = c.direction === 'outbound' ? '📞' : '📲';
-    const durSec    = c.duration || 0;
-    const durStr    = durSec < 1 ? 'missed' : durSec < 60 ? durSec + 's' : Math.floor(durSec/60) + 'm ' + (durSec%60) + 's';
-    const leadName  = leadMap[c.lead_id] || '—';
-    const timeStr   = new Date(c.called_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const emoji    = c.direction === 'outbound' ? '📞' : c.direction === 'inbound' ? '📲' : '🔄';
+    const dirLabel = c.direction === 'outbound' ? 'Outbound' : c.direction === 'inbound' ? 'Inbound' : 'Internal';
+    const durSec   = c.duration || 0;
+    const durStr   = durSec < 1
+      ? '<span style="color:var(--danger);font-size:10px">missed</span>'
+      : durSec < 60 ? durSec + 's' : Math.floor(durSec/60) + 'm ' + (durSec%60) + 's';
+    const timeStr  = new Date(c.called_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const lead     = leadMap[c.lead_id];
+
+    // Extract customer phone from raw JSON
+    let customerPhone = null;
+    try {
+      const raw = typeof c.raw === 'string' ? JSON.parse(c.raw) : (c.raw || {});
+      customerPhone = c.direction === 'outbound'
+        ? (raw.to   && raw.to.number)
+        : (raw.from && raw.from.number);
+    } catch(e) {}
+
+    const arrow = c.direction === 'outbound' ? '→' : '←';
+    const leadInfo = lead
+      ? '<strong style="color:var(--accent)">' + esc(lead.c) + '</strong>'
+        + (customerPhone ? ' <span style="color:var(--text3);font-size:10px">(' + esc(customerPhone) + ')</span>' : '')
+      : customerPhone
+        ? '<span style="color:var(--text3)">' + esc(customerPhone) + '</span> <span style="font-size:10px;color:var(--text3)">(not in CRM)</span>'
+        : '<span style="color:var(--text3)">—</span>';
+
     return '<div class="activity-item">'
       + '<div class="act-icon">' + emoji + '</div>'
-      + '<div class="act-body"><strong>' + esc(c.user_name||'Unknown') + '</strong>'
-      + ' · ' + (c.direction === 'outbound' ? 'Outbound' : 'Inbound') + ' · ' + durStr
-      + '<br><span style="color:var(--text3)">Lead: <strong>' + esc(leadName) + '</strong></span>'
+      + '<div class="act-body">'
+      + '<strong>' + esc(c.user_name || 'Unknown') + '</strong>'
+      + ' <span style="color:var(--text3);font-size:11px">· ' + dirLabel + ' · </span>' + durStr
+      + '<br><span style="font-size:11px">' + arrow + ' ' + leadInfo + '</span>'
       + '</div>'
       + '<div class="act-time">' + timeStr + '</div>'
       + '</div>';
