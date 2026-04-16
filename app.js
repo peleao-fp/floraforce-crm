@@ -204,6 +204,11 @@ async function loadLeadStates() {
       if (Array.isArray(raw)) return raw;
       try { const p = JSON.parse(raw); return Array.isArray(p) ? p : [p]; } catch(e) { return raw ? [raw] : []; }
     })();
+    // Load MC engagement
+    if (s.mc_engaged) {
+      try { l.mc_engaged = typeof s.mc_engaged === 'string' ? JSON.parse(s.mc_engaged) : s.mc_engaged; } catch(e) {}
+    }
+    l.mc_acknowledged = s.mc_acknowledged || false;
   });
   // Overlay real call counts from Intermedia
   await loadIntermedaCallCounts();
@@ -713,10 +718,12 @@ function renderTable() {
     const callBtn = l.ph
       ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
       : '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;opacity:.3" disabled>📞</button>';
-    return '<tr class="' + (l.pr ? 'priority-row' : '') + '" onclick="handleLeadRowClick(event,' + l.id + ')">'
+    const isEngaged = l.mc_engaged && !l.mc_acknowledged;
+    const mcBadge = isEngaged ? '<span class="mc-badge">📧 MC</span> ' : '';
+    return '<tr class="' + (l.pr ? 'priority-row' : '') + (isEngaged ? ' mc-engaged' : '') + '" onclick="handleLeadRowClick(event,' + l.id + ')">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
-      + '<td class="td-company">' + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
+      + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
       + '<td style="font-size:11px">' + st + '</td>'
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
@@ -790,7 +797,18 @@ async function openModal(id) {
   }).join('');
 
   document.getElementById('modal-body').innerHTML =
-    '<div class="modal-section"><div class="modal-section-title">⏱ Last Contact</div><div style="padding:8px 0">' + lastContactInfo + '</div></div>'
+    (lead.mc_engaged && !lead.mc_acknowledged ?
+      '<div class="modal-section" style="background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.3);border-radius:10px;padding:14px 16px;margin-bottom:4px">'
+      + '<div style="font-size:13px;font-weight:700;color:#ca8a04;margin-bottom:8px">📧 Email Campaign Engagement</div>'
+      + '<div style="font-size:12px;color:var(--text2);margin-bottom:10px">'
+      + 'This lead interacted with a recent email campaign.<br>'
+      + '<strong>' + (lead.mc_engaged.opens || 0) + ' opens</strong> · <strong>' + (lead.mc_engaged.clicks || 0) + ' clicks</strong>'
+      + (lead.mc_engaged.campaigns?.length ? '<br><span style="color:var(--text3);font-size:11px">Campaign: ' + esc(lead.mc_engaged.campaigns[0]) + '</span>' : '')
+      + '</div>'
+      + '<button class="btn btn-primary" onclick="acknowledgeMcEngagement(' + lead.id + ')" style="padding:6px 16px;font-size:12px">✅ Acknowledged — I\'ll follow up</button>'
+      + '</div>'
+      : '')
+    + '<div class="modal-section"><div class="modal-section-title">⏱ Last Contact</div><div style="padding:8px 0">' + lastContactInfo + '</div></div>'
     + '<div class="modal-section"><div class="modal-section-title">📞 Call via Intermedia</div>' + phoneHtml + '</div>'
     + '<div class="modal-section"><div class="modal-section-title">🔵 Status</div><div class="status-row" id="modal-status-row">' + statusBtns + '</div></div>'
     + '<div class="modal-section"><div class="modal-section-title">📝 Lead Info</div><div class="info-grid" id="lead-info-grid">' + (await renderEditableFields(lead)) + '</div></div>'
@@ -1368,6 +1386,31 @@ function setPreset(preset, btn) {
   loadAnalytics();
 }
 
+function resetAnalyticsFilters() {
+  const v = document.getElementById('analytics-filter-vendor');
+  const s = document.getElementById('analytics-filter-seg');
+  const st = document.getElementById('analytics-filter-status');
+  if (v) v.value = '';
+  if (s) s.value = '';
+  if (st) st.value = '';
+  loadAnalytics();
+}
+
+function populateAnalyticsFilters() {
+  const vendSel = document.getElementById('analytics-filter-vendor');
+  const segSel  = document.getElementById('analytics-filter-seg');
+  if (!vendSel || !segSel) return;
+
+  // Vendors
+  const vendors = allUsers.filter(u => u.role === 'vendor').map(u => u.name).sort();
+  vendSel.innerHTML = '<option value="">All Vendors</option>'
+    + vendors.map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
+
+  // Segmentations
+  segSel.innerHTML = '<option value="">All Segmentations</option>'
+    + segmentations.map(s => '<option value="' + esc(s) + '">' + esc(s) + '</option>').join('');
+}
+
 async function loadAnalytics() {
   if (currentProfile?.role !== 'admin') return;
 
@@ -1376,6 +1419,11 @@ async function loadAnalytics() {
   if (fromInput) analyticsDateFrom = fromInput;
   if (toInput)   analyticsDateTo   = toInput;
   if (!analyticsDateFrom || !analyticsDateTo) return;
+
+  // Read filters
+  const filterVendor = document.getElementById('analytics-filter-vendor')?.value || '';
+  const filterSeg    = document.getElementById('analytics-filter-seg')?.value    || '';
+  const filterStatus = document.getElementById('analytics-filter-status')?.value || '';
 
   const fromDate = new Date(analyticsDateFrom + 'T00:00:00');
   const toDate   = new Date(analyticsDateTo   + 'T23:59:59');
@@ -1386,7 +1434,11 @@ async function loadAnalytics() {
     .lte('called_at', toDate.toISOString());
   const calls = callLogs || [];
 
-  const pool = leads;
+  // Apply lead filters
+  let pool = leads;
+  if (filterVendor) pool = pool.filter(l => (l.responsible || l.r) === filterVendor);
+  if (filterSeg)    pool = pool.filter(l => l.p === filterSeg);
+  if (filterStatus) pool = pool.filter(l => l.cs === filterStatus);
   const leadMap = {};
   pool.forEach(l => { leadMap[l.id] = l; });
 
@@ -1648,6 +1700,8 @@ async function loadMktPanel() {
   renderMktTagManager();
   await loadMcSettings();
   refreshMktPreview();
+  // Sync MC engagement in background
+  syncMailchimpEngagement();
 }
 
 async function loadMcSettings() {
@@ -2014,9 +2068,11 @@ function switchTab(tab, el) {
   document.getElementById('tab-sales').style.display     = tab === 'sales'     ? 'block' : 'none';
 
   if (tab === 'analytics' && !analyticsDateFrom) {
+    populateAnalyticsFilters();
     const btn = document.querySelector('.preset-btn[onclick*="30d"]');
     if (btn) setPreset('30d', btn);
   } else if (tab === 'analytics') {
+    populateAnalyticsFilters();
     loadAnalytics();
   }
 }
@@ -3163,6 +3219,116 @@ function generateQuotePDF(quote, lead) {
   if (win) {
     win.onload = () => { win.print(); URL.revokeObjectURL(url); };
   }
+}
+
+// ── MAILCHIMP ENGAGEMENT ──────────────────────────────────────
+async function syncMailchimpEngagement() {
+  try {
+    // Get campaigns
+    const campData = await mcCall('get_campaigns');
+    const campaigns = campData.campaigns || [];
+    if (!campaigns.length) return;
+
+    // Get the 5 most recent sent campaigns
+    const recent = campaigns.slice(0, 5);
+    const emailEngaged = new Map(); // email → { opens, clicks, campaigns }
+
+    for (const camp of recent) {
+      const activity = await mcCall('get_campaign_activity', { campaignId: camp.id });
+      
+      // Process opens
+      const openMembers = activity.opens?.members || [];
+      openMembers.forEach(m => {
+        const email = m.email_address?.toLowerCase();
+        if (!email) return;
+        if (!emailEngaged.has(email)) emailEngaged.set(email, { opens: 0, clicks: 0, campaigns: new Set() });
+        emailEngaged.get(email).opens++;
+        emailEngaged.get(email).campaigns.add(camp.settings?.subject_line || camp.id);
+      });
+
+      // Process clicks
+      const clickUrls = activity.clicks?.urls_clicked || [];
+      clickUrls.forEach(url => {
+        (url.members || []).forEach(m => {
+          const email = m.email_address?.toLowerCase();
+          if (!email) return;
+          if (!emailEngaged.has(email)) emailEngaged.set(email, { opens: 0, clicks: 0, campaigns: new Set() });
+          emailEngaged.get(email).clicks++;
+          emailEngaged.get(email).campaigns.add(camp.settings?.subject_line || camp.id);
+        });
+      });
+    }
+
+    if (!emailEngaged.size) return;
+
+    // Match engaged emails to leads
+    let newEngagements = 0;
+    leads.forEach(l => {
+      if (!l.em) return;
+      const email = l.em.split(';')[0].toLowerCase().trim();
+      const eng = emailEngaged.get(email);
+      if (!eng) return;
+
+      // Only highlight if not already acknowledged
+      if (!l.mc_engaged) {
+        l.mc_engaged = {
+          opens:     eng.opens,
+          clicks:    eng.clicks,
+          campaigns: [...eng.campaigns],
+          synced_at: new Date().toISOString()
+        };
+        newEngagements++;
+      }
+    });
+
+    if (newEngagements > 0) {
+      // Save to lead_states
+      await Promise.all(
+        leads.filter(l => l.mc_engaged && !l.mc_acknowledged).map(l =>
+          sb.from('lead_states').upsert({
+            lead_id:    l.id,
+            mc_engaged: JSON.stringify(l.mc_engaged),
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'lead_id' })
+        )
+      );
+      applyFilters();
+      showToast('📧 ' + newEngagements + ' leads engaged with email campaigns!');
+    }
+  } catch(e) {
+    console.warn('MC engagement sync failed:', e.message);
+  }
+}
+
+async function acknowledgeMcEngagement(leadId) {
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  lead.mc_acknowledged = true;
+
+  // Log in timeline
+  if (!lead.tl) lead.tl = [];
+  const eng = lead.mc_engaged;
+  lead.tl.push({
+    ts:  new Date().toISOString(),
+    v:   currentProfile?.name || '—',
+    txt: '📧 MC engagement acknowledged — ' + (eng?.opens || 0) + ' opens, ' + (eng?.clicks || 0) + ' clicks'
+  });
+
+  // Update lead_states — mark acknowledged, change status if novo
+  if (lead.cs === 'novo') lead.cs = 'contatado';
+
+  await sb.from('lead_states').upsert({
+    lead_id:          lead.id,
+    mc_acknowledged:  true,
+    cs:               lead.cs,
+    timeline:         lead.tl,
+    updated_at:       new Date().toISOString()
+  }, { onConflict: 'lead_id' });
+
+  logActivity(lead.id, lead.c, 'mc_engagement', 'Acknowledged email engagement');
+  showToast('✅ Acknowledged — status updated');
+  applyFilters();
 }
 
 // ── START ─────────────────────────────────────────────────────
