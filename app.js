@@ -210,10 +210,11 @@ async function loadLeadStates() {
 }
 
 async function loadIntermedaCallCounts() {
-  // Get start of current week (Monday) in UTC
+  // Week = Sunday 00:00 UTC → next Sunday 00:00 UTC
   const now = new Date();
-  const day = now.getUTCDay() || 7;
-  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (day - 1)));
+  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon ... 6=Sat
+  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
+  weekStart.setUTCHours(0, 0, 0, 0);
 
   // Load THIS WEEK calls — ALL calls (no lead_id filter) for accurate vendor totals
   const { data: weekData } = await sb.from('intermedia_call_log')
@@ -265,22 +266,45 @@ async function buildCallsByProfile(callsByIntermediaName, weeklyByIntermediaName
   }
   window._callsByProfile = {};
   window._weeklyCallsByProfile = {};
+
   users.forEach(u => {
-    const pName = u.name.toLowerCase();
+    // Strip common prefixes like S01, S07, S13 etc from CRM name
+    const pNameFull = u.name.toLowerCase().trim();
+    const pNameStripped = pNameFull.replace(/^s\d+\s+/i, '').trim(); // remove "S13 " prefix
+    const pWords = pNameStripped.split(' ').filter(w => w.length > 2);
+
     let total = 0, weekly = 0;
+
     Object.entries(callsByIntermediaName).forEach(([iName, cnt]) => {
-      const iLower = iName.toLowerCase();
-      const words = iLower.split(' ').filter(w => w.length > 2);
-      const match = pName === iLower || pName.includes(iLower) || iLower.includes(pName) ||
-        words.every(w => pName.includes(w));
+      const iLower = iName.toLowerCase().trim();
+      const iWords = iLower.split(' ').filter(w => w.length > 2);
+
+      const match =
+        pNameFull === iLower ||                              // exact match
+        pNameStripped === iLower ||                          // stripped == intermedia
+        iLower.includes(pNameStripped) ||                    // intermedia contains stripped CRM name
+        pNameStripped.includes(iLower) ||                    // stripped CRM contains intermedia name
+        pNameFull.includes(iLower) ||                        // full CRM contains intermedia
+        iLower.includes(pNameFull) ||                        // intermedia contains full CRM
+        // First name only match (e.g. CRM="KEN", Intermedia="Ken Van Slyke")
+        (pWords.length === 1 && iLower.startsWith(pWords[0])) ||
+        (iWords.length === 1 && pNameStripped.startsWith(iWords[0])) ||
+        // All words of shorter name appear in longer name
+        (pWords.length > 0 && pWords.every(w => iLower.includes(w))) ||
+        (iWords.length > 0 && iWords.every(w => pNameStripped.includes(w)));
+
       if (match) {
         total += cnt;
         weekly += weeklyByIntermediaName[iName] || 0;
       }
     });
+
     if (total > 0) window._callsByProfile[u.name] = total;
     window._weeklyCallsByProfile[u.name] = weekly;
   });
+
+  // Debug log
+  console.log('📞 Weekly calls by profile:', JSON.stringify(window._weeklyCallsByProfile));
 }
 
 async function saveLeadState(lead) {
