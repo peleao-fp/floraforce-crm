@@ -1516,6 +1516,8 @@ function mktSortBy(col) {
   refreshMktPreview();
 }
 
+let mktDisplayLeads = [];
+
 async function refreshMktPreview() {
   // Always fetch fresh tags so all users see the latest
   await loadMktTagTypes();
@@ -1544,6 +1546,13 @@ async function refreshMktPreview() {
     if (mktSortCol === 'cc') { av = a.cc || 0; bv = b.cc || 0; return (av - bv) * mktSortDir; }
     return av.localeCompare(bv) * mktSortDir;
   });
+
+  // Save for export — export uses exactly what's visible in the table
+  mktDisplayLeads = display;
+
+  // Update count label
+  const countLabel = document.getElementById('mkt-count-label');
+  if (countLabel) countLabel.textContent = display.length.toLocaleString() + ' leads';
 
   // Sort indicators
   const cols = ['c','cn','em','cs','p','responsible','mkt_tag'];
@@ -1598,8 +1607,20 @@ function mktSearchInput(val) {
   refreshMktPreview();
 }
 
+let mcExportCancelled = false;
+
+function cancelMcExport() {
+  mcExportCancelled = true;
+  const cancelBtn = document.getElementById('mkt-cancel-btn');
+  if (cancelBtn) cancelBtn.disabled = true;
+  const progressLbl = document.getElementById('mkt-progress-label');
+  if (progressLbl) progressLbl.textContent = '⏹ Cancelling...';
+  showToast('⏹ Cancelling export...');
+}
+
 async function exportToMailchimp() {
-  const pool = getMktLeads().filter(l => l.em);
+  // Use exactly what's visible in the table (after search/filter)
+  const pool = mktDisplayLeads.filter(l => l.em);
   if (!pool.length) { showToast('⚠️ No leads with email to export'); return; }
 
   const btn = document.getElementById('mkt-export-btn');
@@ -1614,10 +1635,26 @@ async function exportToMailchimp() {
 
   if (!listId && !newName) { showToast('⚠️ Select a list or enter a new list name'); return; }
 
+  mcExportCancelled = false;
   btn.disabled = true;
   btn.textContent = '⏳ Exporting...';
   progressWrap.style.display = 'block';
   progressBar.style.width = '0%';
+  progressBar.style.background = 'var(--accent)';
+
+  // Show cancel button
+  let cancelBtn = document.getElementById('mkt-cancel-btn');
+  if (!cancelBtn) {
+    cancelBtn = document.createElement('button');
+    cancelBtn.id = 'mkt-cancel-btn';
+    cancelBtn.className = 'btn btn-danger';
+    cancelBtn.style.cssText = 'padding:8px 16px;font-size:12px';
+    cancelBtn.textContent = '⏹ Cancel';
+    cancelBtn.onclick = cancelMcExport;
+    btn.parentNode.insertBefore(cancelBtn, btn.nextSibling);
+  }
+  cancelBtn.style.display = '';
+  cancelBtn.disabled = false;
 
   try {
     // Create new list if needed
@@ -1634,6 +1671,16 @@ async function exportToMailchimp() {
     let done = 0, errors = 0;
 
     for (let i = 0; i < pool.length; i += CHUNK) {
+      // Check cancellation before each chunk
+      if (mcExportCancelled) {
+        progressBar.style.background = 'var(--warn)';
+        progressLbl.textContent = '⏹ Cancelled — ' + done + ' contacts exported before cancel';
+        statusEl.textContent = done + ' added before cancel';
+        showToast('⏹ Export cancelled — ' + done + ' contacts were sent');
+        logActivity(null, null, 'field_edit', 'Mailchimp export CANCELLED: ' + done + ' contacts to list ' + listId);
+        return;
+      }
+
       const chunk = pool.slice(i, i + CHUNK);
       const members = chunk.map(l => ({
         email:   l.em,
@@ -1658,11 +1705,15 @@ async function exportToMailchimp() {
     logActivity(null, null, 'field_edit', 'Mailchimp export: ' + done + ' contacts to list ' + listId);
 
   } catch(err) {
-    statusEl.textContent = '❌ ' + err.message;
-    showToast('❌ Export failed: ' + err.message);
+    if (!mcExportCancelled) {
+      statusEl.textContent = '❌ ' + err.message;
+      showToast('❌ Export failed: ' + err.message);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = '📤 Export to Mailchimp';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    mcExportCancelled = false;
   }
 }
 
