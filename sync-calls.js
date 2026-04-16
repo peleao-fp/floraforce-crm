@@ -1,4 +1,5 @@
 // FloraForce — Intermedia Call Sync
+// Saves ALL calls (matched and unmatched) for full vendor call counting
 const fetch = require('node-fetch');
 
 const INTERMEDIA_CLIENT_ID     = process.env.INTERMEDIA_CLIENT_ID;
@@ -37,7 +38,6 @@ async function getCallLogs(token) {
   const data  = await res.json();
   const calls = data.calls || data.items || data.records || data.data || data.results || (Array.isArray(data) ? data : []);
   console.log('📞 Retrieved', calls.length, 'calls');
-  calls.slice(0, 3).forEach((c, i) => console.log('  Call', i+1, ':', JSON.stringify(c).substring(0, 250)));
   return calls;
 }
 
@@ -45,10 +45,7 @@ async function getLeads() {
   const url = SUPABASE_URL + '/rest/v1/leads?select=id,phone,company&phone=neq.null&limit=5000';
   const res = await fetch(url, { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY } });
   if (!res.ok) throw new Error('Get leads failed: ' + res.status);
-  const leads = await res.json();
-  console.log('📋 Loaded', leads.length, 'leads with phone numbers');
-  leads.slice(0, 3).forEach(l => console.log('  Sample: "' + l.phone + '" →', normalizePhone(l.phone)));
-  return leads;
+  return await res.json();
 }
 
 async function getSyncedCallIds() {
@@ -71,43 +68,103 @@ function formatDuration(s) {
   return m === 0 ? s + 's' : m + 'm ' + (s % 60) + 's';
 }
 
+function extractUserName(call) {
+  // For outbound: vendor is the caller (from)
+  // For inbound: vendor is the receiver (to)
+  if (call.direction === 'outbound') {
+    return (call.from && call.from.name) || null;
+  } else {
+    return (call.to && call.to.name) || (call.from && call.from.name) || null;
+  }
+}
+
 async function saveCallLog(call, leadId) {
   const callId    = call.id || call.callId || call.globalCallId;
   const duration  = call.duration || 0;
   const direction = call.direction || 'outbound';
-  const userName  = (direction === 'outbound' ? (call.from && call.from.name) : (call.to && call.to.name)) || 'Unknown';
+  const userName  = extractUserName(call) || 'Unknown';
   const startTime = call.start || call.startTime || new Date().toISOString();
 
+  // Save to intermedia_call_log (all calls, lead_id can be null)
   const logRes = await fetch(SUPABASE_URL + '/rest/v1/intermedia_call_log', {
     method: 'POST',
-    headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
-    body: JSON.stringify({ call_id: callId, lead_id: leadId, direction, duration, user_name: userName, called_at: startTime, raw: JSON.stringify(call) })
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=ignore-duplicates,return=minimal'
+    },
+    body: JSON.stringify({
+      call_id:   callId,
+      lead_id:   leadId || null,
+      direction,
+      duration,
+      user_name: userName,
+      called_at: startTime,
+      raw:       JSON.stringify(call)
+    })
   });
+
+  // 200 = duplicate (already exists), skip lead state update
   if (logRes.status === 200) return false;
-  if (!logRes.ok && logRes.status !== 409) { console.error('  ❌ Log insert failed:', logRes.status); return false; }
-
-  const stateRes = await fetch(SUPABASE_URL + '/rest/v1/lead_states?lead_id=eq.' + leadId + '&select=timeline,call_count,cs', {
-    headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY }
-  });
-  const states   = await stateRes.json();
-  const state    = states[0] || {};
-  const timeline = state.timeline || [];
-  const emoji    = direction === 'outbound' ? '📞' : '📲';
-  timeline.push({ ts: startTime, v: userName + ' (Intermedia)', txt: emoji + ' ' + (direction === 'outbound' ? 'Outbound' : 'Inbound') + ' call · ' + formatDuration(duration), type: 'call_log' });
-
-  if (states.length > 0) {
-    await fetch(SUPABASE_URL + '/rest/v1/lead_states?lead_id=eq.' + leadId, {
-      method: 'PATCH',
-      headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ timeline, call_count: (state.call_count || 0) + 1, last_call: startTime, updated_at: new Date().toISOString() })
-    });
-  } else {
-    await fetch(SUPABASE_URL + '/rest/v1/lead_states', {
-      method: 'POST',
-      headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=ignore-duplicates' },
-      body: JSON.stringify({ lead_id: leadId, timeline, call_count: 1, last_call: startTime, cs: 'contatado', updated_at: new Date().toISOString() })
-    });
+  if (!logRes.ok && logRes.status !== 409 && logRes.status !== 201) {
+    console.error('  ❌ Log insert failed:', logRes.status);
+    return false;
   }
+
+  // Only update lead state if we have a matched lead
+  if (leadId) {
+    const stateRes = await fetch(SUPABASE_URL + '/rest/v1/lead_states?lead_id=eq.' + leadId + '&select=timeline,call_count,cs', {
+      headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY }
+    });
+    const states   = await stateRes.json();
+    const state    = states[0] || {};
+    const timeline = state.timeline || [];
+    const emoji    = direction === 'outbound' ? '📞' : '📲';
+    timeline.push({
+      ts:   startTime,
+      v:    userName + ' (Intermedia)',
+      txt:  emoji + ' ' + (direction === 'outbound' ? 'Outbound' : 'Inbound') + ' call · ' + formatDuration(duration),
+      type: 'call_log'
+    });
+
+    if (states.length > 0) {
+      await fetch(SUPABASE_URL + '/rest/v1/lead_states?lead_id=eq.' + leadId, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({
+          timeline,
+          call_count: (state.call_count || 0) + 1,
+          last_call:  startTime,
+          updated_at: new Date().toISOString()
+        })
+      });
+    } else {
+      await fetch(SUPABASE_URL + '/rest/v1/lead_states', {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=ignore-duplicates'
+        },
+        body: JSON.stringify({
+          lead_id:    leadId,
+          timeline,
+          call_count: 1,
+          last_call:  startTime,
+          cs:         'contatado',
+          updated_at: new Date().toISOString()
+        })
+      });
+    }
+  }
+
   return true;
 }
 
@@ -116,34 +173,54 @@ async function main() {
   try {
     const token  = await getAccessToken();
     const calls  = await getCallLogs(token);
-    if (!calls.length) { console.log('ℹ️  No calls in last 2 hours.'); return; }
+    if (!calls.length) { console.log('ℹ️  No calls in last 24 hours.'); return; }
 
     const leads  = await getLeads();
     const synced = await getSyncedCallIds();
 
+    // Build phone → lead map
     const phoneMap = new Map();
-    leads.forEach(l => { const n = normalizePhone(l.phone); if (n) phoneMap.set(n, { id: l.id, company: l.company }); });
+    leads.forEach(l => {
+      const n = normalizePhone(l.phone);
+      if (n) phoneMap.set(n, { id: l.id, company: l.company });
+    });
 
-    let matched = 0, skipped = 0, unmatched = 0;
+    let matched = 0, savedUnmatched = 0, skipped = 0;
+
     for (const call of calls) {
       const callId = call.id || call.callId || call.globalCallId;
+
+      // Skip already synced
       if (callId && synced.has(String(callId))) { skipped++; continue; }
 
+      // Try to match lead by phone
       const customerPhone = call.direction === 'outbound'
-        ? (call.to && call.to.number)
+        ? (call.to   && call.to.number)
         : (call.from && call.from.number);
-
-      console.log('  🔍', call.direction, '| customer:', customerPhone, '| norm:', normalizePhone(customerPhone));
 
       const norm = normalizePhone(customerPhone);
       const lead = norm ? phoneMap.get(norm) : null;
 
-      if (!lead) { unmatched++; continue; }
-      const saved = await saveCallLog(call, lead.id);
-      if (saved) { matched++; console.log('  ✅ Saved:', customerPhone, '→', lead.company); }
-      else skipped++;
+      // Save ALL calls — with or without lead match
+      const saved = await saveCallLog(call, lead ? lead.id : null);
+
+      if (saved) {
+        if (lead) {
+          matched++;
+        } else {
+          savedUnmatched++;
+          const userName = extractUserName(call) || 'Unknown';
+          // Only log unmatched for outbound to reduce noise
+          if (call.direction === 'outbound') {
+            console.log('  📞 Saved (no lead):', userName, '→', customerPhone);
+          }
+        }
+      } else {
+        skipped++;
+      }
     }
-    console.log('🎉 Done — Matched:', matched, '| Skipped:', skipped, '| Unmatched:', unmatched);
+
+    console.log('🎉 Done — Matched leads:', matched, '| Saved (no lead):', savedUnmatched, '| Skipped:', skipped);
   } catch (err) {
     console.error('❌ Sync error:', err.message);
     process.exit(1);
