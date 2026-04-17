@@ -1365,14 +1365,34 @@ async function createUser() {
   const pass  = document.getElementById('new-pass').value;
   const role  = document.getElementById('new-role').value;
   if (!name || !email || !pass) { showToast('⚠️ Fill in all fields'); return; }
-  const { data, error } = await sb.auth.signUp({ email, password: pass });
-  if (error) { showToast('❌ ' + error.message); return; }
-  if (data.user) await sb.from('profiles').insert({ id: data.user.id, name, role });
-  showToast('✅ User created: ' + email);
-  document.getElementById('new-name').value  = '';
-  document.getElementById('new-email').value = '';
-  document.getElementById('new-pass').value  = '';
-  await loadAdminData();
+
+  const btn = document.querySelector('[onclick="createUser()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Creating...'; }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch('https://zsgoocrqhzndghpseqtj.supabase.co/functions/v1/admin-api', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token
+      },
+      body: JSON.stringify({ action: 'create_user', email, password: pass, name, role })
+    });
+    const data = await res.json();
+    if (data.error) { showToast('❌ ' + data.error); return; }
+
+    showToast('✅ User created: ' + email);
+    document.getElementById('new-name').value  = '';
+    document.getElementById('new-email').value = '';
+    document.getElementById('new-pass').value  = '';
+    logActivity(null, null, 'field_edit', 'Created user: ' + name + ' (' + role + ')');
+    await loadAdminData();
+  } catch(e) {
+    showToast('❌ Error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '+ Create User'; }
+  }
 }
 
 // ── ANALYTICS ─────────────────────────────────────────────────
