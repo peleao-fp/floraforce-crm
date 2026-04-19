@@ -166,6 +166,9 @@ async function loadLeads() {
     cn:          l.contact     || '',
     em:          l.email       || '',
     ph:          l.phone       || '',
+    address:     l.address     || '',
+    website:     l.website     || '',
+    instagram:   l.instagram   || '',
     sl: l.sales_total ? {
       total:     parseFloat(l.sales_total)  || 0,
       count:     parseInt(l.sales_count)    || 0,
