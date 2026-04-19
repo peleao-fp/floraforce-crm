@@ -513,8 +513,20 @@ function populateFilters() {
   const states = [...new Set(pool.map(l => l.st).filter(Boolean))].sort();
   const sSel   = document.getElementById('filter-state');
   states.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sSel.appendChild(o); });
-  // Use segmentations list for filter
   populateSegmentationFilter();
+  // Owner filter — only for admin/users with view_all_leads
+  const ownerSel = document.getElementById('filter-owner');
+  if (ownerSel && (currentProfile?.role === 'admin' || hasPermission('view_all_leads'))) {
+    const owners = [...new Set(leads.map(l => l.responsible || l.r).filter(Boolean))].sort();
+    owners.forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o; opt.textContent = o;
+      ownerSel.appendChild(opt);
+    });
+  } else if (ownerSel) {
+    // Hide for vendors who can't see all leads
+    ownerSel.closest('.sidebar-section').style.display = 'none';
+  }
 }
 function toggleStatus(el, val) {
   document.querySelectorAll('#status-chips .chip').forEach(c => c.classList.remove('active'));
@@ -534,12 +546,14 @@ function applyFilters() {
   const pipeline = document.getElementById('filter-segmentation')?.value || '';
   const type     = document.getElementById('filter-type')?.value || '';
   const state    = document.getElementById('filter-state')?.value || '';
+  const owner    = document.getElementById('filter-owner')?.value || '';
   const pool     = getMyLeads();
   filteredLeads  = pool.filter(l => {
     if (activeStatus !== 'all' && l.cs !== activeStatus) return false;
     if (pipeline && l.p !== pipeline)                     return false;
     if (type     && !(l.ty || '').includes(type))         return false;
     if (state    && l.st !== state)                        return false;
+    if (owner    && (l.responsible || l.r) !== owner)     return false;
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
@@ -976,6 +990,9 @@ async function renderEditableFields(lead) {
     + field('Contact',        'cn',          lead.cn)
     + field('Email',          'em',          lead.em, 'email')
     + field('Phone',          'ph',          lead.ph, 'tel')
+    + field('Address',        'address',     lead.address)
+    + field('Instagram',      'instagram',   lead.instagram)
+    + field('Website',        'website',     lead.website)
     + renderOwnerDropdown(lead.responsible || lead.r)
     + field('Type',           'ty',          lead.ty)
     + renderPipelineDropdown(lead)
@@ -1019,7 +1036,16 @@ async function updateLeadField(input) {
     logActivity(currentLead.id, currentLead.c, 'transfer', (oldVal||'Unassigned') + ' → ' + (newVal||'Unassigned'));
     showToast('🔀 Reassigned to ' + (newVal || 'Unassigned'));
   } else {
-    const { error } = await sb.from('leads').update({ [key === 'c' ? 'company' : key === 'cn' ? 'contact' : key === 'em' ? 'email' : key === 'ph' ? 'phone' : key === 'ty' ? 'type' : key]: newVal }).eq('id', currentLead.id);
+    const { error } = await sb.from('leads').update({ [
+      key === 'c'         ? 'company'   :
+      key === 'cn'        ? 'contact'   :
+      key === 'em'        ? 'email'     :
+      key === 'ph'        ? 'phone'     :
+      key === 'ty'        ? 'type'      :
+      key === 'address'   ? 'address'   :
+      key === 'instagram' ? 'instagram' :
+      key === 'website'   ? 'website'   : key
+    ]: newVal }).eq('id', currentLead.id);
     if (error) console.warn('leads update error:', error.message);
     await saveLeadState(currentLead);
     logActivity(currentLead.id, currentLead.c, 'field_edit', key + ': "' + oldVal + '" → "' + newVal + '"');
@@ -2145,6 +2171,9 @@ function openNewLeadModal() {
         ${newLeadField('Phone',     'nl-phone',    'tel')}
         ${newLeadField('Type',      'nl-type',     'text',  false, 'Florist, Event Planner...')}
         ${newLeadField('State',     'nl-state',    'text',  false, 'e.g. Florida')}
+        ${newLeadField('Address',   'nl-address',  'text',  false, '123 Main St, Miami FL...')}
+        ${newLeadField('Website',   'nl-website',  'text',  false, 'www.example.com')}
+        ${newLeadField('Instagram', 'nl-instagram','text',  false, '@handle')}
       </div>
     </div>
     <div class="modal-section">
@@ -2170,12 +2199,15 @@ async function saveNewLead() {
   const company = document.getElementById('nl-company')?.value.trim();
   if (!company) { showToast('⚠️ Company name is required'); return; }
 
-  const notes   = document.getElementById('nl-notes')?.value.trim();
-  const contact = document.getElementById('nl-contact')?.value.trim();
-  const email   = document.getElementById('nl-email')?.value.trim();
-  const phone   = document.getElementById('nl-phone')?.value.trim();
-  const type    = document.getElementById('nl-type')?.value.trim();
-  const state   = document.getElementById('nl-state')?.value.trim();
+  const notes     = document.getElementById('nl-notes')?.value.trim();
+  const contact   = document.getElementById('nl-contact')?.value.trim();
+  const email     = document.getElementById('nl-email')?.value.trim();
+  const phone     = document.getElementById('nl-phone')?.value.trim();
+  const type      = document.getElementById('nl-type')?.value.trim();
+  const state     = document.getElementById('nl-state')?.value.trim();
+  const address   = document.getElementById('nl-address')?.value.trim();
+  const website   = document.getElementById('nl-website')?.value.trim();
+  const instagram = document.getElementById('nl-instagram')?.value.trim();
 
   const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
   const newId = maxId + 1;
@@ -2183,11 +2215,14 @@ async function saveNewLead() {
   const { error } = await sb.from('leads').insert({
     id:          newId,
     company:     company,
-    contact:     contact  || null,
-    email:       email    || null,
-    phone:       phone    || null,
-    type:        type     || null,
-    state:       state    || null,
+    contact:     contact   || null,
+    email:       email     || null,
+    phone:       phone     || null,
+    type:        type      || null,
+    state:       state     || null,
+    address:     address   || null,
+    website:     website   || null,
+    instagram:   instagram || null,
     responsible: currentProfile?.name || null,
     pipeline:    'New Lead'
   });
@@ -2213,7 +2248,8 @@ async function saveNewLead() {
     ph: phone || '', sl: null, cs: 'novo', tg: [], pr: false,
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
-    mkt_tag: []
+    mkt_tag: [],
+    address: address || '', website: website || '', instagram: instagram || ''
   };
   leads.push(newLead);
 
@@ -2361,11 +2397,9 @@ function bulkImportFileChange(input) {
 }
 
 function parseBulkCSV(text) {
-  // Normalize line endings
   const lines = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   if (lines.length < 2) { showToast('⚠️ CSV is empty'); return; }
 
-  // Auto-detect separator: semicolon or comma
   const sep = lines[0].includes(';') ? ';' : ',';
 
   const parseRow = (line, separator) => {
@@ -2381,23 +2415,26 @@ function parseBulkCSV(text) {
     return cols;
   };
 
-  // Parse header using same parseRow to handle quoted headers
   const rawHeaders = parseRow(lines[0], sep);
   const headers = rawHeaders.map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
 
-  const idx = name => headers.findIndex(h => h === name);
+  const idx = (...names) => headers.findIndex(h => names.includes(h));
   const colMap = {
-    id:       idx('id'),
-    company:  idx('company'),
-    contact:  idx('contact'),
-    email:    idx('email'),
-    phone:    idx('phone'),
-    owner:    idx('owner'),
-    pipeline: headers.findIndex(h => h === 'pipeline' || h === 'segmentation'),
-    type:     idx('type'),
-    status:   idx('status'),
-    tags:     idx('tags'),
-    mkt_tag:  headers.findIndex(h => h === 'mkt tag' || h === 'mkt_tag'),
+    id:          idx('id'),
+    company:     idx('company'),
+    contact:     idx('contact'),
+    email:       idx('email'),
+    phone:       idx('phone'),
+    owner:       idx('owner', 'responsible'),
+    pipeline:    idx('pipeline', 'segmentation'),
+    type:        idx('type'),
+    state:       idx('state'),
+    address:     idx('address'),
+    instagram:   idx('instagram'),
+    website:     idx('website'),
+    status:      idx('status'),
+    tags:        idx('tags'),
+    mkt_tag:     idx('mkt tag', 'mkt_tag'),
   };
 
   const statusMap = {
@@ -2418,72 +2455,93 @@ function parseBulkCSV(text) {
 
     const csvId      = get(colMap.id);
     const csvCompany = get(colMap.company);
+    if (!csvCompany) continue; // company is required
 
-    if (!csvId && !csvCompany) continue;
-
+    // Try to find existing lead
     let lead = null;
     if (csvId) lead = leads.find(l => String(l.id) === String(csvId));
-    if (!lead && csvCompany) lead = leads.find(l => l.c.toLowerCase() === csvCompany.toLowerCase());
+    if (!lead && csvCompany) lead = leads.find(l => l.c?.toLowerCase() === csvCompany.toLowerCase());
+
+    // ── NEW LEAD ─────────────────────────────────────────────
     if (!lead) {
-      bulkPreviewData.push({ error: `Not found: "${csvId || csvCompany}"`, row: i });
+      const newLeadData = {
+        company:     csvCompany,
+        contact:     get(colMap.contact),
+        email:       get(colMap.email),
+        phone:       get(colMap.phone),
+        responsible: get(colMap.owner),
+        pipeline:    get(colMap.pipeline),
+        type:        get(colMap.type),
+        state:       get(colMap.state),
+        address:     get(colMap.address),
+        instagram:   get(colMap.instagram),
+        website:     get(colMap.website),
+      };
+      const csvStatus = get(colMap.status);
+      const mappedStatus = csvStatus ? (statusMap[csvStatus.toLowerCase()] || 'novo') : 'novo';
+      const csvTags = get(colMap.tags);
+      const tags = csvTags ? csvTags.split(';').map(t => t.trim()).filter(Boolean) : [];
+      const csvMktTag = get(colMap.mkt_tag);
+      const mktTags = csvMktTag ? csvMktTag.split(/[;,]/).map(t => t.trim()).filter(Boolean) : [];
+
+      bulkPreviewData.push({
+        isNew: true,
+        newLeadData,
+        status: mappedStatus,
+        tags,
+        mktTags,
+        display: [{ label: '🆕 New Lead', from: '—', to: csvCompany }]
+      });
       continue;
     }
 
+    // ── UPDATE EXISTING ───────────────────────────────────────
     const changes = {};
     const display = [];
 
     const check = (field, csvVal, currentVal, label) => {
       if (csvVal === null || csvVal === undefined) return;
-      const cur = String(currentVal || '');
-      const csv = String(csvVal);
-      if (csv === cur) return;
+      if (String(csvVal) === String(currentVal || '')) return;
       changes[field] = csvVal;
-      display.push({ label, from: cur || '—', to: csv });
+      display.push({ label, from: String(currentVal || '—'), to: String(csvVal) });
     };
 
-    check('c',           get(colMap.company),  lead.c,                     'Company');
-    check('cn',          get(colMap.contact),  lead.cn,                    'Contact');
-    check('em',          get(colMap.email),    lead.em,                    'Email');
-    check('ph',          get(colMap.phone),    lead.ph,                    'Phone');
-    check('responsible', get(colMap.owner),    lead.responsible || lead.r, 'Owner');
-    check('p',           get(colMap.pipeline), lead.p,                     'Segmentation');
-    check('ty',          get(colMap.type),     lead.ty,                    'Type');
+    check('c',           get(colMap.company),   lead.c,                     'Company');
+    check('cn',          get(colMap.contact),   lead.cn,                    'Contact');
+    check('em',          get(colMap.email),     lead.em,                    'Email');
+    check('ph',          get(colMap.phone),     lead.ph,                    'Phone');
+    check('responsible', get(colMap.owner),     lead.responsible || lead.r, 'Owner');
+    check('p',           get(colMap.pipeline),  lead.p,                     'Segmentation');
+    check('ty',          get(colMap.type),      lead.ty,                    'Type');
+    check('st',          get(colMap.state),     lead.st,                    'State');
+    check('address',     get(colMap.address),   lead.address,               'Address');
+    check('instagram',   get(colMap.instagram), lead.instagram,             'Instagram');
+    check('website',     get(colMap.website),   lead.website,               'Website');
 
     const csvStatus = get(colMap.status);
     if (csvStatus) {
       const mapped = statusMap[csvStatus.toLowerCase()];
-      if (mapped && mapped !== lead.cs) {
-        changes['cs'] = mapped;
-        display.push({ label: 'Status', from: lead.cs, to: mapped });
-      }
+      if (mapped && mapped !== lead.cs) { changes['cs'] = mapped; display.push({ label: 'Status', from: lead.cs, to: mapped }); }
     }
 
     const csvTags = get(colMap.tags);
     if (csvTags !== null) {
       const newTags = csvTags.split(';').map(t => t.trim()).filter(Boolean);
-      const currentTagsStr = (lead.tg || []).join('; ');
-      if (csvTags !== currentTagsStr) {
-        changes['tg'] = newTags;
-        display.push({ label: 'Tags', from: currentTagsStr || '—', to: csvTags });
-      }
+      const cur = (lead.tg || []).join('; ');
+      if (csvTags !== cur) { changes['tg'] = newTags; display.push({ label: 'Tags', from: cur || '—', to: csvTags }); }
     }
 
     const csvMktTag = get(colMap.mkt_tag);
     if (csvMktTag !== null) {
-      // Support multiple tags separated by ; or ,
       const newTags = csvMktTag ? csvMktTag.split(/[;,]/).map(t => t.trim()).filter(Boolean) : [];
-      const currentTags = Array.isArray(lead.mkt_tag) ? lead.mkt_tag : (lead.mkt_tag ? [lead.mkt_tag] : []);
-      const currentStr = JSON.stringify(currentTags.sort());
-      const newStr = JSON.stringify(newTags.sort());
-      if (currentStr !== newStr) {
+      const curTags = Array.isArray(lead.mkt_tag) ? lead.mkt_tag : (lead.mkt_tag ? [lead.mkt_tag] : []);
+      if (JSON.stringify(curTags.sort()) !== JSON.stringify(newTags.sort())) {
         changes['mkt_tag'] = JSON.stringify(newTags);
-        display.push({ label: 'MKT Tag', from: currentTags.join(', ') || '—', to: newTags.join(', ') || '—' });
+        display.push({ label: 'MKT Tag', from: curTags.join(', ') || '—', to: newTags.join(', ') || '—' });
       }
     }
 
-    if (display.length > 0) {
-      bulkPreviewData.push({ lead, changes, display });
-    }
+    if (display.length > 0) bulkPreviewData.push({ lead, changes, display });
   }
 
   renderBulkPreview();
@@ -2493,8 +2551,10 @@ function renderBulkPreview() {
   const el = document.getElementById('bulk-preview-wrap');
   if (!el) return;
 
-  const errors  = bulkPreviewData.filter(r => r.error);
-  const changes = bulkPreviewData.filter(r => !r.error);
+  const newLeads = bulkPreviewData.filter(r => r.isNew);
+  const updates  = bulkPreviewData.filter(r => !r.isNew && !r.error);
+  const errors   = bulkPreviewData.filter(r => r.error);
+  const total    = newLeads.length + updates.length;
 
   if (bulkPreviewData.length === 0) {
     el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:12px 0">No changes detected in CSV.</div>';
@@ -2503,11 +2563,31 @@ function renderBulkPreview() {
 
   let html = '';
 
-  if (changes.length > 0) {
-    html += '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:8px">✅ ' + changes.length + ' lead' + (changes.length > 1 ? 's' : '') + ' will be updated:</div>';
-    html += '<div style="overflow-x:auto;max-height:400px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px">';
+  // New leads section
+  if (newLeads.length > 0) {
+    html += '<div style="font-size:12px;color:#60a5fa;font-weight:600;margin-bottom:8px">🆕 ' + newLeads.length + ' new lead' + (newLeads.length > 1 ? 's' : '') + ' will be created:</div>';
+    html += '<div style="overflow-x:auto;max-height:200px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px;margin-bottom:12px">';
+    html += '<table class="users-table"><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Owner</th><th>Segmentation</th></tr></thead><tbody>';
+    newLeads.forEach(r => {
+      const d = r.newLeadData;
+      html += '<tr>'
+        + '<td style="font-weight:500">' + esc(d.company || '—') + '</td>'
+        + '<td>' + esc(d.contact || '—') + '</td>'
+        + '<td style="color:var(--accent)">' + esc(d.email || '—') + '</td>'
+        + '<td>' + esc(d.phone || '—') + '</td>'
+        + '<td>' + esc(d.responsible || '—') + '</td>'
+        + '<td>' + esc(d.pipeline || '—') + '</td>'
+        + '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Updates section
+  if (updates.length > 0) {
+    html += '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:8px">✏️ ' + updates.length + ' lead' + (updates.length > 1 ? 's' : '') + ' will be updated:</div>';
+    html += '<div style="overflow-x:auto;max-height:300px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px;margin-bottom:12px">';
     html += '<table class="users-table"><thead><tr><th>Lead</th><th>Field</th><th>From</th><th>To</th></tr></thead><tbody>';
-    changes.forEach(r => {
+    updates.forEach(r => {
       r.display.forEach((d, i) => {
         html += '<tr>'
           + '<td style="font-weight:500">' + (i === 0 ? esc(r.lead.c) : '') + '</td>'
@@ -2521,13 +2601,13 @@ function renderBulkPreview() {
   }
 
   if (errors.length > 0) {
-    html += '<div style="font-size:12px;color:var(--warn);font-weight:600;margin:12px 0 6px">⚠️ ' + errors.length + ' row' + (errors.length > 1 ? 's' : '') + ' not matched:</div>';
+    html += '<div style="font-size:12px;color:var(--warn);font-weight:600;margin:12px 0 6px">⚠️ ' + errors.length + ' row' + (errors.length > 1 ? 's' : '') + ' skipped:</div>';
     html += errors.map(e => '<div style="font-size:11px;color:var(--text3);padding:2px 0">' + esc(e.error) + '</div>').join('');
   }
 
-  if (changes.length > 0) {
+  if (total > 0) {
     html += '<div style="margin-top:14px;display:flex;gap:10px">'
-      + '<button class="btn btn-primary" onclick="applyBulkImport()" style="padding:8px 20px">✅ Apply ' + changes.length + ' Changes</button>'
+      + '<button class="btn btn-primary" onclick="applyBulkImport()" style="padding:8px 20px">✅ Apply (' + (newLeads.length ? newLeads.length + ' new' : '') + (newLeads.length && updates.length ? ' + ' : '') + (updates.length ? updates.length + ' updates' : '') + ')</button>'
       + '<button class="btn btn-ghost" onclick="cancelBulkImport()">Cancel</button>'
       + '</div>';
   }
@@ -2536,20 +2616,75 @@ function renderBulkPreview() {
 }
 
 async function applyBulkImport() {
-  const changes = bulkPreviewData.filter(r => !r.error);
-  if (!changes.length) return;
+  const newLeads = bulkPreviewData.filter(r => r.isNew);
+  const updates  = bulkPreviewData.filter(r => !r.isNew && !r.error);
+  if (!newLeads.length && !updates.length) return;
 
   const btn = document.querySelector('[onclick="applyBulkImport()"]');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Applying...'; }
 
-  let done = 0, errors = 0;
+  let created = 0, updated = 0, errors = 0;
 
-  for (const r of changes) {
+  // ── CREATE NEW LEADS ─────────────────────────────────────────
+  for (const r of newLeads) {
+    try {
+      const d = r.newLeadData;
+      const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
+      const newId = maxId + 1;
+
+      const { error } = await sb.from('leads').insert({
+        id:          newId,
+        company:     d.company,
+        contact:     d.contact    || null,
+        email:       d.email      || null,
+        phone:       d.phone      || null,
+        responsible: d.responsible|| null,
+        pipeline:    d.pipeline   || null,
+        type:        d.type       || null,
+        state:       d.state      || null,
+        address:     d.address    || null,
+        instagram:   d.instagram  || null,
+        website:     d.website    || null,
+      });
+      if (error) throw error;
+
+      const newLead = {
+        id: newId, c: d.company, p: d.pipeline || '', r: d.responsible || '',
+        st: d.state || '', ty: d.type || '', cn: d.contact || '',
+        em: d.email || '', ph: d.phone || '', sl: null,
+        cs: r.status || 'novo', tg: r.tags || [], pr: false,
+        cc: 0, lc: null, cv: false, cm: '', tl: [],
+        responsible: d.responsible || '', mkt_tag: r.mktTags || [],
+        address: d.address || '', instagram: d.instagram || '', website: d.website || ''
+      };
+
+      await sb.from('lead_states').insert({
+        lead_id:     newId,
+        responsible: d.responsible || null,
+        cs:          r.status || 'novo',
+        tags:        r.tags || [],
+        mkt_tag:     JSON.stringify(r.mktTags || []),
+        priority:    false,
+        call_count:  0,
+        timeline:    [],
+        updated_by:  currentUser?.id,
+        updated_at:  new Date().toISOString()
+      });
+
+      leads.push(newLead);
+      created++;
+    } catch(e) {
+      errors++;
+      console.error('Bulk create error:', e);
+    }
+  }
+
+  // ── UPDATE EXISTING LEADS ────────────────────────────────────
+  for (const r of updates) {
     try {
       const lead = r.lead;
       const c = r.changes;
 
-      // Update leads table fields
       const leadsUpdate = {};
       if (c.c)           leadsUpdate.company     = c.c;
       if (c.cn)          leadsUpdate.contact     = c.cn;
@@ -2558,36 +2693,40 @@ async function applyBulkImport() {
       if (c.responsible) leadsUpdate.responsible = c.responsible;
       if (c.p)           leadsUpdate.pipeline    = c.p;
       if (c.ty)          leadsUpdate.type        = c.ty;
+      if (c.st)          leadsUpdate.state       = c.st;
+      if (c.address)     leadsUpdate.address     = c.address;
+      if (c.instagram)   leadsUpdate.instagram   = c.instagram;
+      if (c.website)     leadsUpdate.website     = c.website;
 
       if (Object.keys(leadsUpdate).length > 0) {
         await sb.from('leads').update(leadsUpdate).eq('id', lead.id);
       }
-
-      // Apply changes to local lead object
       Object.assign(lead, c);
-
-      // Save lead_states (status, tags, mkt_tag, responsible)
       await saveLeadState(lead);
-
-      done++;
+      updated++;
     } catch(e) {
       errors++;
-      console.error('Bulk import error:', e);
+      console.error('Bulk update error:', e);
     }
   }
 
-  // Refresh display
   applyFilters();
   bulkPreviewData = [];
 
   const el = document.getElementById('bulk-preview-wrap');
-  if (el) el.innerHTML = '<div style="color:var(--accent);font-size:13px;padding:12px 0">✅ ' + done + ' leads updated' + (errors ? ', ' + errors + ' errors' : '') + '.</div>';
+  if (el) el.innerHTML = '<div style="color:var(--accent);font-size:13px;padding:12px 0">✅ '
+    + (created ? created + ' leads created' : '')
+    + (created && updated ? ' · ' : '')
+    + (updated ? updated + ' leads updated' : '')
+    + (errors ? ' · ⚠️ ' + errors + ' errors' : '')
+    + '</div>';
 
   const fileInput = document.getElementById('bulk-csv-input');
   if (fileInput) fileInput.value = '';
 
-  logActivity(null, null, 'field_edit', 'Bulk CSV import: ' + done + ' leads updated');
-  showToast('✅ ' + done + ' leads updated!');
+  logActivity(null, null, 'field_edit', 'Bulk CSV: ' + created + ' created, ' + updated + ' updated');
+  showToast('✅ ' + created + ' created · ' + updated + ' updated');
+  if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
 }
 
 function cancelBulkImport() {
