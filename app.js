@@ -3260,7 +3260,7 @@ function generateQuotePDF(quote, lead) {
 
   /* ── HEADER ── */
   .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-  .header-logo img { height: 90px; width: auto; }
+  .header-logo img { height: 110px; width: auto; }
   .header-company { border: 2px solid #111; padding: 10px 16px; text-align: center; min-width: 300px; }
   .header-company .doc-title { font-size: 18px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
   .header-company .co-name { font-size: 14px; font-weight: 700; }
@@ -3313,7 +3313,7 @@ function generateQuotePDF(quote, lead) {
   <!-- HEADER -->
   <div class="header">
     <div class="header-logo">
-      <img src="https://peleao-fp.github.io/floraforce-crm/assets/LOGO-FF-ESCURO.png" alt="Full Pot of Flowers">
+      <img src="https://fullpot.com/wp-content/uploads/logo.png" alt="Full Pot of Flowers">
     </div>
     <div class="header-company">
       <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: _________</div>
