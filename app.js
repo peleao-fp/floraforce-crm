@@ -2503,7 +2503,7 @@ function parseBulkCSV(text) {
 
     const csvId      = get(colMap.id);
     const csvCompany = get(colMap.company);
-    if (!csvCompany) continue; // company is required
+    if (!csvId && !csvCompany) continue; // need at least id OR company
 
     // Try to find existing lead
     let lead = null;
