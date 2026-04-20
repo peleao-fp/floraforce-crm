@@ -204,8 +204,28 @@ async function loadLeadStates() {
     l.mkt_tag = (() => {
       const raw = s.mkt_tag;
       if (!raw) return [];
-      if (Array.isArray(raw)) return raw;
-      try { const p = JSON.parse(raw); return Array.isArray(p) ? p : [p]; } catch(e) { return raw ? [raw] : []; }
+      if (Array.isArray(raw)) {
+        // Unwrap any double-serialized elements e.g. "[\"Call Center Cust\"]" inside array
+        return raw.map(item => {
+          if (typeof item === 'string' && (item.startsWith('[') || item.startsWith('"'))) {
+            try { const p = JSON.parse(item); return Array.isArray(p) ? p : [p]; } catch(e) { return item; }
+          }
+          return item;
+        }).flat();
+      }
+      try {
+        const p = JSON.parse(raw);
+        if (Array.isArray(p)) {
+          // Unwrap double-serialized elements
+          return p.map(item => {
+            if (typeof item === 'string' && (item.startsWith('[') || item.startsWith('"'))) {
+              try { const q = JSON.parse(item); return Array.isArray(q) ? q : [q]; } catch(e) { return item; }
+            }
+            return item;
+          }).flat();
+        }
+        return [p];
+      } catch(e) { return raw ? [raw] : []; }
     })();
     // Load MC engagement
     if (s.mc_engaged) {
@@ -213,6 +233,22 @@ async function loadLeadStates() {
     }
     l.mc_acknowledged = s.mc_acknowledged || false;
   });
+
+  // Auto-fix double-encoded mkt_tags and save clean version back to DB
+  const toRepair = leads.filter(l => {
+    if (!l.mkt_tag || !l.mkt_tag.length) return false;
+    return l.mkt_tag.some(t => typeof t === 'string' && (t.startsWith('[') || t.startsWith('"')));
+  });
+  if (toRepair.length > 0) {
+    console.log('🔧 Repairing', toRepair.length, 'double-encoded mkt_tags...');
+    await Promise.all(toRepair.map(l =>
+      sb.from('lead_states').update({
+        mkt_tag: JSON.stringify(l.mkt_tag.map(t => String(t)))
+      }).eq('lead_id', l.id)
+    ));
+    console.log('✅ mkt_tag repair complete');
+  }
+
   // Overlay real call counts from Intermedia
   await loadIntermedaCallCounts();
 }
@@ -347,7 +383,16 @@ async function saveLeadState(lead) {
     converted:   lead.cv          || false,
     notes:       lead.cm          || '',
     timeline:    lead.tl          || [],
-    mkt_tag:     Array.isArray(lead.mkt_tag) ? JSON.stringify(lead.mkt_tag) : (lead.mkt_tag ? JSON.stringify([lead.mkt_tag]) : '[]'),
+    mkt_tag:     (() => {
+      const tags = lead.mkt_tag;
+      if (!tags) return '[]';
+      if (Array.isArray(tags)) return JSON.stringify(tags.map(t => String(t)));
+      if (typeof tags === 'string') {
+        try { const p = JSON.parse(tags); return JSON.stringify(Array.isArray(p) ? p.map(t => String(t)) : [String(p)]); }
+        catch(e) { return JSON.stringify([tags]); }
+      }
+      return '[]';
+    })(),
     updated_by:  currentUser?.id,
     updated_at:  new Date().toISOString()
   }, { onConflict: 'lead_id' });
