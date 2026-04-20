@@ -185,10 +185,18 @@ async function loadLeads() {
 
 // ── LEAD STATES ───────────────────────────────────────────────
 async function loadLeadStates() {
-  const { data } = await sb.from('lead_states').select('*');
-  if (!data) return;
+  // Paginate — lead_states can exceed 1000 rows
+  let all = [], from = 0;
+  while (true) {
+    const { data, error } = await sb.from('lead_states').select('*').range(from, from + 999);
+    if (error || !data || !data.length) break;
+    all = all.concat(data);
+    if (data.length < 1000) break;
+    from += 1000;
+  }
+  if (!all.length) return;
   const map = {};
-  data.forEach(s => { map[s.lead_id] = s; });
+  all.forEach(s => { map[s.lead_id] = s; });
   leads.forEach(l => {
     const s = map[l.id];
     if (!s) return;
