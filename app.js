@@ -2582,8 +2582,8 @@ function parseBulkCSV(text) {
     const csvMktTag = get(colMap.mkt_tag);
     if (csvMktTag !== null) {
       const newTags = csvMktTag ? csvMktTag.split(/[;,]/).map(t => t.trim()).filter(Boolean) : [];
-      const curTags = Array.isArray(lead.mkt_tag) ? lead.mkt_tag : (lead.mkt_tag ? [lead.mkt_tag] : []);
-      if (JSON.stringify(curTags.sort()) !== JSON.stringify(newTags.sort())) {
+      const curTags = Array.isArray(lead.mkt_tag) ? [...lead.mkt_tag] : (lead.mkt_tag ? [lead.mkt_tag] : []);
+      if (JSON.stringify([...curTags].sort()) !== JSON.stringify([...newTags].sort())) {
         changes['mkt_tag'] = JSON.stringify(newTags);
         display.push({ label: 'MKT Tag', from: curTags.join(', ') || '—', to: newTags.join(', ') || '—' });
       }
