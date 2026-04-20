@@ -1683,7 +1683,7 @@ function exportCSV() {
   const isAdmin = currentProfile?.role === 'admin';
   const pool = isAdmin ? leads : getMyLeads();
   const rows = [
-    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
+    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
   ];
   pool.forEach(l => {
     rows.push([
@@ -1692,6 +1692,9 @@ function exportCSV() {
       l.cn || '',
       l.em || '',
       l.ph || '',
+      l.address || '',
+      l.website || '',
+      l.instagram || '',
       l.responsible || l.r || '',
       l.p || '',
       l.ty || '',
@@ -1703,8 +1706,9 @@ function exportCSV() {
       Array.isArray(l.mkt_tag) ? l.mkt_tag.join('; ') : (l.mkt_tag || '')
     ]);
   });
+  // Use semicolon as separator — safer for company names that contain commas
   const esc2 = v => '"' + String(v).replace(/"/g, '""') + '"';
-  const csv = rows.map(r => r.map(esc2).join(',')).join('\n');
+  const csv  = '\uFEFF' + rows.map(r => r.map(esc2).join(';')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
