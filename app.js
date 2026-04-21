@@ -1989,7 +1989,12 @@ function getMktLeads() {
     if (emailOnly && !l.em)                                        return false;
     if (mktTag) {
       const tags = Array.isArray(l.mkt_tag) ? l.mkt_tag : (l.mkt_tag ? [l.mkt_tag] : []);
-      if (!tags.includes(mktTag)) return false;
+      const exactMatch = document.getElementById('mkt-filter-tag-exact')?.checked;
+      if (exactMatch) {
+        if (tags.length !== 1 || tags[0] !== mktTag) return false;
+      } else {
+        if (!tags.includes(mktTag)) return false;
+      }
     }
     return true;
   });

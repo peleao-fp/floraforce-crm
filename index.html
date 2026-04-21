@@ -488,6 +488,10 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
           <select id="mkt-filter-tag-visible" onchange="document.getElementById('mkt-filter-tag').value=this.value;refreshMktPreview()" class="form-select" style="min-width:160px">
             <option value="">All Tags</option>
           </select>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);cursor:pointer;margin-top:4px">
+            <input type="checkbox" id="mkt-filter-tag-exact" onchange="refreshMktPreview()" style="cursor:pointer">
+            Only this tag
+          </label>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;font-weight:600">Segmentation</span>
