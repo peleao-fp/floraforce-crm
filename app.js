@@ -1821,10 +1821,41 @@ async function removeMktTagType(i) {
 }
 
 function updateMktTagFilter() {
-  const sel = document.getElementById('mkt-filter-tag');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">All Tags</option>'
+  const opts = '<option value="">All Tags</option>'
     + mktTagTypes.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('');
+  // Update hidden filter
+  const sel = document.getElementById('mkt-filter-tag');
+  if (sel) sel.innerHTML = opts;
+  // Update visible filter
+  const selV = document.getElementById('mkt-filter-tag-visible');
+  if (selV) { const cur = selV.value; selV.innerHTML = opts; if (cur) selV.value = cur; }
+  // Also populate visible segmentation and vendor dropdowns
+  const segV = document.getElementById('mkt-filter-seg-visible');
+  if (segV) {
+    const curSeg = segV.value;
+    segV.innerHTML = '<option value="">All Segmentations</option>'
+      + segmentations.map(s => '<option value="' + esc(s) + '">' + esc(s) + '</option>').join('');
+    if (curSeg) segV.value = curSeg;
+  }
+  const ownV = document.getElementById('mkt-filter-own-visible');
+  if (ownV && allUsers.length) {
+    const curOwn = ownV.value;
+    const vendors = allUsers.filter(u => u.role === 'vendor' || u.role === 'admin').map(u => u.name).sort();
+    ownV.innerHTML = '<option value="">All Vendors</option>'
+      + vendors.map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
+    if (curOwn) ownV.value = curOwn;
+  }
+}
+
+function clearMktFilters() {
+  ['mkt-filter-tag','mkt-filter-tag-visible','mkt-filter-segmentation','mkt-filter-seg-visible',
+   'mkt-filter-status','mkt-filter-st-visible','mkt-filter-vendor','mkt-filter-own-visible'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const searchEl = document.getElementById('mkt-search-input');
+  if (searchEl) { searchEl.value = ''; mktSearch = ''; }
+  refreshMktPreview();
 }
 
 function toggleMktView() {
