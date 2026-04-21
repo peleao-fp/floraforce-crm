@@ -2475,7 +2475,7 @@ function parseBulkCSV(text) {
   const lines = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   if (lines.length < 2) { showToast('⚠️ CSV is empty'); return; }
 
-  const sep = lines[0].includes(';') ? ';' : ',';
+  const sep = lines[0].includes('\t') ? '\t' : ';';
 
   const parseRow = (line, separator) => {
     const cols = [];
