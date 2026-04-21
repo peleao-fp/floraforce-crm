@@ -292,11 +292,10 @@ async function loadIntermedaCallCounts() {
       .range(from, to)
   );
 
-  // ALL-TIME — outbound calls with lead for lead call counts
+  // ALL-TIME — all calls with lead for lead counts & last contact
   const allData = await fetchAllPages((from, to) =>
     sb.from('intermedia_call_log')
-      .select('lead_id, called_at, user_name')
-      .eq('direction', 'outbound')
+      .select('lead_id, called_at, user_name, direction')
       .not('lead_id', 'is', null)
       .range(from, to)
   );
@@ -304,7 +303,9 @@ async function loadIntermedaCallCounts() {
   const counts = {}, lastCall = {}, daysSinceCall = {}, weeklyByIntermediaName = {};
 
   allData.forEach(c => {
-    counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
+    if (c.direction === 'outbound') {
+      counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
+    }
     if (!lastCall[c.lead_id] || c.called_at > lastCall[c.lead_id]) {
       lastCall[c.lead_id] = c.called_at;
     }
@@ -1399,7 +1400,6 @@ async function loadCallsLog() {
   if (!el) return;
   const { data } = await sb.from('intermedia_call_log')
     .select('*')
-    .eq('direction', 'outbound')
     .order('called_at', { ascending: false })
     .limit(200);
   if (!data || !data.length) {
@@ -3039,6 +3039,13 @@ async function resetToRoleDefaults(userId) {
 // ── QUOTES ────────────────────────────────────────────────────
 let currentQuote = null;
 let quoteItems = [];
+let quoteExtraCharges = [];
+const DEFAULT_EXTRA_CHARGES = [
+  { name: 'Fuel Charge', amount: 0, enabled: false },
+  { name: 'FedEx', amount: 0, enabled: false },
+  { name: 'Delivery', amount: 0, enabled: false },
+  { name: 'Service Fee', amount: 0, enabled: false },
+];
 
 function openQuoteModal(leadId) {
   window.editingQuoteId = null;
@@ -3046,6 +3053,7 @@ function openQuoteModal(leadId) {
   if (!lead) return;
   currentQuote = { lead_id: leadId, status: 'draft', items: [], discount: 0, total: 0, notes: '', valid_until: '' };
   quoteItems = [];
+  quoteExtraCharges = DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
   renderQuoteModal(lead);
   document.getElementById('quote-modal').style.display = 'flex';
 }
@@ -3054,6 +3062,7 @@ function closeQuoteModal() {
   document.getElementById('quote-modal').style.display = 'none';
   currentQuote = null;
   quoteItems = [];
+  quoteExtraCharges = [];
   window.editingQuoteId = null;
 }
 
@@ -3066,6 +3075,7 @@ async function openEditQuoteModal(quoteId, leadId) {
   window.editingQuoteId = quoteId;
   currentQuote = { lead_id: q.lead_id, status: q.status, items: q.items || [], discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '' };
   quoteItems = q.items ? q.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) })) : [];
+  quoteExtraCharges = q.extra_charges ? q.extra_charges : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
 
   renderQuoteModal(lead);
 
@@ -3194,6 +3204,11 @@ function renderQuoteModal(lead) {
     </div>
 
     <div class="modal-section">
+      <div class="modal-section-title">➕ Extra Charges</div>
+      <div id="quote-extra-wrap"></div>
+    </div>
+
+    <div class="modal-section">
       <div style="display:flex;justify-content:flex-end;gap:16px;align-items:center;flex-wrap:wrap">
         <div style="font-size:13px;color:var(--text2)">
           Discount: <input type="number" id="q-discount" value="0" min="0" max="100" step="0.1"
@@ -3211,6 +3226,7 @@ function renderQuoteModal(lead) {
   `;
 
   renderQuoteItems();
+  renderQuoteExtraCharges();
 
   document.getElementById('quote-modal-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeQuoteModal()">Cancel</button>
@@ -3293,13 +3309,39 @@ function renderQuoteItems() {
   `;
 }
 
+function renderQuoteExtraCharges() {
+  const wrap = document.getElementById('quote-extra-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px">'
+    + quoteExtraCharges.map((c, i) =>
+        '<div style="display:flex;align-items:center;gap:10px">'
+        + '<input type="checkbox" id="ec-chk-' + i + '" ' + (c.enabled ? 'checked' : '') + ' onchange="toggleExtraCharge(' + i + ',this.checked)" style="cursor:pointer;width:14px;height:14px">'
+        + '<label for="ec-chk-' + i + '" style="font-size:12px;min-width:130px;cursor:pointer;color:var(--text2)">' + esc(c.name) + '</label>'
+        + '<span style="font-size:12px;color:var(--text3)">$</span>'
+        + '<input type="number" class="edit-field" value="' + (c.amount || 0) + '" min="0" step="0.01" style="width:90px" oninput="updateExtraCharge(' + i + ',this.value)" ' + (!c.enabled ? 'disabled' : '') + '>'
+        + (c.enabled ? '<span style="font-size:11px;color:var(--accent);font-weight:600">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>' : '')
+        + '</div>'
+      ).join('')
+    + '</div>';
+}
+function toggleExtraCharge(i, enabled) {
+  quoteExtraCharges[i].enabled = enabled;
+  renderQuoteExtraCharges();
+  updateQuoteTotals();
+}
+function updateExtraCharge(i, val) {
+  quoteExtraCharges[i].amount = parseFloat(val) || 0;
+  renderQuoteExtraCharges();
+  updateQuoteTotals();
+}
 function updateQuoteTotals() {
   const subtotal = quoteItems.reduce((s, i) => s + (i.subtotal || 0), 0);
   const discount = parseFloat(document.getElementById('q-discount')?.value) || 0;
-  const total = subtotal * (1 - discount / 100);
+  const extraTotal = quoteExtraCharges.filter(c => c.enabled).reduce((s, c) => s + (c.amount || 0), 0);
+  const total = subtotal * (1 - discount / 100) + extraTotal;
   const el = document.getElementById('q-total');
   if (el) el.textContent = '$' + total.toFixed(2);
-  return { subtotal, discount, total };
+  return { subtotal, discount, extraTotal, total };
 }
 
 async function saveQuote() {
@@ -3316,6 +3358,7 @@ async function saveQuote() {
     notes:          document.getElementById('q-notes').value,
     discount,
     items:          quoteItems,
+    extra_charges:  quoteExtraCharges.filter(c => c.enabled),
     total
   };
 
@@ -3355,11 +3398,9 @@ async function saveAndDownloadQuote() {
 }
 
 function generateQuotePDF(quote, lead) {
-  const { subtotal, discount, total } = {
-    subtotal: quote.items.reduce((s, i) => s + (i.subtotal || 0), 0),
-    discount: quote.discount || 0,
-    total: quote.total || 0
-  };
+  const subtotal = quote.items.reduce((s, i) => s + (i.subtotal || 0), 0);
+  const discount = quote.discount || 0;
+  const total = quote.total || 0;
 
   const statusColors = { draft: '#9db8a4', sent: '#2563eb', approved: '#16a34a', declined: '#dc2626' };
   const statusColor = statusColors[quote.status] || '#9db8a4';
@@ -3504,6 +3545,7 @@ function generateQuotePDF(quote, lead) {
   <div class="totals">
     <div class="total-row"><span class="total-label">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
     ${discount > 0 ? '<div class="total-row"><span class="total-label">Discount (' + discount + '%)</span><span>-$' + (subtotal * discount / 100).toFixed(2) + '</span></div>' : ''}
+    ${(quote.extra_charges || []).filter(c => c.enabled && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
     <div class="total-row final"><span class="total-label">TOTAL</span><span>$${total.toFixed(2)}</span></div>
   </div>
 
