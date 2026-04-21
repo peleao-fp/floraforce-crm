@@ -2195,7 +2195,7 @@ async function exportToMailchimp() {
       document.getElementById('mkt-audience-select').value = listId;
     }
 
-    const CHUNK = 500;
+    const CHUNK = 50;
     let done = 0, errors = 0;
 
     for (let i = 0; i < pool.length; i += CHUNK) {
