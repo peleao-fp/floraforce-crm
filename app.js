@@ -283,18 +283,20 @@ async function loadIntermedaCallCounts() {
     return all;
   }
 
-  // THIS WEEK — all calls for vendor totals
+  // THIS WEEK — outbound calls for vendor totals
   const weekData = await fetchAllPages((from, to) =>
     sb.from('intermedia_call_log')
       .select('lead_id, called_at, user_name, direction, duration')
+      .eq('direction', 'outbound')
       .gte('called_at', weekStart.toISOString())
       .range(from, to)
   );
 
-  // ALL-TIME — only calls with lead for lead call counts
+  // ALL-TIME — outbound calls with lead for lead call counts
   const allData = await fetchAllPages((from, to) =>
     sb.from('intermedia_call_log')
       .select('lead_id, called_at, user_name')
+      .eq('direction', 'outbound')
       .not('lead_id', 'is', null)
       .range(from, to)
   );
@@ -1387,6 +1389,7 @@ async function loadCallsLog() {
   if (!el) return;
   const { data } = await sb.from('intermedia_call_log')
     .select('*')
+    .eq('direction', 'outbound')
     .order('called_at', { ascending: false })
     .limit(200);
   if (!data || !data.length) {
@@ -1565,6 +1568,7 @@ async function loadAnalytics() {
   while (true) {
     const { data: batch } = await sb.from('intermedia_call_log')
       .select('*')
+      .eq('direction', 'outbound')
       .gte('called_at', fromDate.toISOString())
       .lte('called_at', toDate.toISOString())
       .range(callFrom, callFrom + 999);
@@ -1654,8 +1658,6 @@ async function loadAnalytics() {
   const statusLabels = { novo:'🔵 New', contatado:'🟡 Contacted', proposta:'🟣 Proposal', cliente:'🟢 Client' };
   const maxStatus = Math.max(...Object.values(statusCounts), 1);
 
-  const outbound = calls.filter(c => c.direction === 'outbound').length;
-  const inbound  = calls.filter(c => c.direction === 'inbound').length;
   const missed   = calls.filter(c => (c.duration||0) < 5).length;
   const answered = calls.length - missed;
 
@@ -1670,8 +1672,6 @@ async function loadAnalytics() {
     + (totalCalls === 0
         ? '<div style="color:var(--text3);padding:20px;text-align:center">No calls in this period</div>'
         : [
-            ['📞 Outbound', outbound, '#60a5fa'],
-            ['📲 Inbound',  inbound,  '#34d399'],
             ['✅ Answered', answered, '#a78bfa'],
             ['📵 Missed',   missed,   '#f87171'],
           ].map(([lbl,v,clr]) =>
