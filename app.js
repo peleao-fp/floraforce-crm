@@ -2222,7 +2222,8 @@ async function exportToMailchimp() {
             COMPANY: l.c || ''
           }
         }))
-        .filter(m => m.email_address && m.email_address.includes('@'));
+        .filter(m => m.email_address && m.email_address.includes('@'))
+        .filter((m, i, arr) => arr.findIndex(x => x.email_address === m.email_address) === i); // dedup
 
       const data = await mcCall('batch_members_direct', { listId, members, tag });
       done   += (data.new_members?.length || 0) + (data.updated_members?.length || 0) || data.total_created || 0;
