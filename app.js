@@ -2225,7 +2225,7 @@ async function exportToMailchimp() {
         .filter(m => m.email_address && m.email_address.includes('@'));
 
       const data = await mcCall('batch_members_direct', { listId, members, tag });
-      done   += (data.new_members?.length || 0) + (data.updated_members?.length || 0);
+      done   += (data.new_members?.length || 0) + (data.updated_members?.length || 0) || data.total_created || 0;
       errors += data.error_count || 0;
 
       const pct = Math.min(100, Math.round(((i + chunk.length) / pool.length) * 100));
