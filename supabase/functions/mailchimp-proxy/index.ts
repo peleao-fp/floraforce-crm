@@ -38,11 +38,40 @@ serve(async (req) => {
       return res.json()
     }
 
+    // ── GET SETTINGS ──────────────────────────────────────────
+    if (action === 'get_settings') {
+      const { data } = await sbAdmin.from('app_settings').select('value').eq('key', 'mc_settings').single()
+      try { return new Response(JSON.stringify(data?.value ? JSON.parse(data.value) : { main_list_id: '', tag_lists: {} }), { headers: corsHeaders }) }
+      catch(e) { return new Response(JSON.stringify({ main_list_id: '', tag_lists: {} }), { headers: corsHeaders }) }
+    }
+
+    if (action === 'set_main_list') {
+      const { listId } = body
+      const { data: cur } = await sbAdmin.from('app_settings').select('value').eq('key', 'mc_settings').single()
+      const settings = cur?.value ? JSON.parse(cur.value) : { tag_lists: {} }
+      settings.main_list_id = listId
+      await sbAdmin.from('app_settings').upsert({ key: 'mc_settings', value: JSON.stringify(settings) }, { onConflict: 'key' })
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+    }
+
+    if (action === 'set_tag_list') {
+      const { tag, listId } = body
+      const { data: cur } = await sbAdmin.from('app_settings').select('value').eq('key', 'mc_settings').single()
+      const settings = cur?.value ? JSON.parse(cur.value) : { tag_lists: {} }
+      if (!settings.tag_lists) settings.tag_lists = {}
+      if (listId) settings.tag_lists[tag] = listId
+      else delete settings.tag_lists[tag]
+      await sbAdmin.from('app_settings').upsert({ key: 'mc_settings', value: JSON.stringify(settings) }, { onConflict: 'key' })
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+    }
+
+    // ── GET LISTS ─────────────────────────────────────────────
     if (action === 'get_lists') {
       const data = await mcFetch('/lists?count=100')
       return new Response(JSON.stringify(data), { headers: corsHeaders })
     }
 
+    // ── CREATE LIST ───────────────────────────────────────────
     if (action === 'create_list') {
       const data = await mcFetch('/lists', 'POST', {
         name: body.listName,
@@ -54,22 +83,19 @@ serve(async (req) => {
       return new Response(JSON.stringify(data), { headers: corsHeaders })
     }
 
+    // ── BATCH MEMBERS ─────────────────────────────────────────
     if (action === 'batch_members_direct') {
       const { listId, members, tag } = body
       if (!listId || !members?.length) return new Response(JSON.stringify({ error: 'Missing listId or members' }), { status: 400, headers: corsHeaders })
 
-      // 1. Batch upsert members
       const batchData = await mcFetch(`/lists/${listId}`, 'POST', {
         members: members.map((m: any) => ({ ...m, status_if_new: 'subscribed' })),
         update_existing: true,
       })
 
-      // 2. Apply tag to all members if provided
       if (tag && tag.trim()) {
         const tagName = tag.trim()
         const allEmails = members.map((m: any) => m.email_address).filter(Boolean)
-
-        // Apply tag per member in chunks of 50
         const CHUNK = 50
         for (let i = 0; i < allEmails.length; i += CHUNK) {
           const chunk = allEmails.slice(i, i + CHUNK)
@@ -79,29 +105,53 @@ serve(async (req) => {
               await mcFetch(`/lists/${listId}/members/${hash}/tags`, 'POST', {
                 tags: [{ name: tagName, status: 'active' }],
               })
-            } catch (_) { /* ignore per-member errors */ }
+            } catch (_) {}
           }))
         }
-
         batchData.tag_applied = tagName
         batchData.tag_count = allEmails.length
       }
 
-      batchData.debug = `listId=${listId} count=${members.length} first_email=${members[0]?.email_address} tag=${tag || 'none'}`
+      batchData.debug = `listId=${listId} count=${members.length} tag=${tag || 'none'}`
       return new Response(JSON.stringify(batchData), { headers: corsHeaders })
     }
 
+    // ── SYNC CONTACT ──────────────────────────────────────────
+    if (action === 'sync_contact') {
+      const { lead } = body
+      if (!lead?.email) return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+      const hash = await md5(lead.email.toLowerCase().trim())
+      await mcFetch(`/lists/e2f2a95258/members/${hash}`, 'PUT', {
+        email_address: lead.email,
+        status_if_new: 'subscribed',
+        merge_fields: { FNAME: (lead.contact||'').split(' ')[0]||'', LNAME: (lead.contact||'').split(' ').slice(1).join(' ')||'', COMPANY: lead.company||'' },
+      }).catch(() => null)
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+    }
+
+    // ── ARCHIVE CONTACT ───────────────────────────────────────
+    if (action === 'archive_contact') {
+      const { email } = body
+      if (!email) return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+      const hash = await md5(email.toLowerCase().trim())
+      await mcFetch(`/lists/e2f2a95258/members/${hash}`, 'DELETE').catch(() => null)
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+    }
+
+    // ── GET CAMPAIGNS ─────────────────────────────────────────
     if (action === 'get_campaigns') {
       const data = await mcFetch('/campaigns?count=50&sort_field=send_time&sort_dir=DESC')
       return new Response(JSON.stringify(data), { headers: corsHeaders })
     }
 
+    // ── GET CAMPAIGN ACTIVITY ─────────────────────────────────
     if (action === 'get_campaign_activity') {
       const { campaignId } = body
       const data = await mcFetch(`/reports/${campaignId}`)
       return new Response(JSON.stringify(data), { headers: corsHeaders })
     }
 
+    // ── SET TAG ───────────────────────────────────────────────
     if (action === 'set_tag') {
       const { listId, email, tagName, status } = body
       const hash = await md5(email.toLowerCase().trim())
