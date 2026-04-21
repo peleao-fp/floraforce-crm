@@ -62,6 +62,9 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 @media(max-width:900px){.mkt-mailchimp-grid{grid-template-columns:1fr}}
 
 [data-theme="light"]{--bg:#f0f4f1;--surface:#fff;--surface2:#e8f0ea;--border:#c8dace;--border2:#d5e5da;--text:#0f1f14;--text2:#3a5c44;--text3:#6b9478;--accent:#16a34a;--accent2:#15803d;--accent-dim:rgba(22,163,74,.12);--accent-dim2:rgba(22,163,74,.06);--shadow:0 4px 24px rgba(0,0,0,.12)}
+
+/* Logo blend mode: screen works on dark bg (light logo), multiply works on light bg (dark logo) */
+[data-theme="light"] #topbar-logo,[data-theme="light"] #login-logo{mix-blend-mode:multiply !important}
 </style>
 </head>
 <body>
