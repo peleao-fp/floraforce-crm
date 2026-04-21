@@ -301,7 +301,7 @@ async function loadIntermedaCallCounts() {
       .range(from, to)
   );
 
-  const counts = {}, lastCall = {}, weeklyByIntermediaName = {};
+  const counts = {}, lastCall = {}, daysSinceCall = {}, weeklyByIntermediaName = {};
 
   allData.forEach(c => {
     counts[c.lead_id] = (counts[c.lead_id] || 0) + 1;
