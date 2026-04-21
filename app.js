@@ -311,7 +311,7 @@ async function loadIntermedaCallCounts() {
   });
 
   weekData.forEach(c => {
-    if (c.user_name) {
+    if (c.user_name && c.direction === 'outbound') {
       weeklyByIntermediaName[c.user_name] = (weeklyByIntermediaName[c.user_name] || 0) + 1;
     }
   });
@@ -329,6 +329,7 @@ async function loadIntermedaCallCounts() {
       const iLc = lastCall[l.id];
       if (iLc && (!l.lc || iLc > l.lc)) l.lc = iLc;
     }
+    l.daysSinceCall = (l.id in daysSinceCall) ? daysSinceCall[l.id] : (l.lc ? Math.floor((now - new Date(l.lc)) / (1000 * 60 * 60 * 24)) : null);
   });
 }
 
@@ -828,7 +829,16 @@ function renderTable() {
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
       + '<td>' + tags + '</td>'
-      + '<td style="text-align:center;color:' + (l.cc > 0 ? 'var(--accent)' : 'var(--text3)') + '">' + l.cc + '</td>'
+      + '<td style="text-align:center">'
+      + '<span style="color:' + (l.cc > 0 ? 'var(--accent)' : 'var(--text3)') + '">' + l.cc + '</span>'
+      + (l.daysSinceCall !== null && l.daysSinceCall !== undefined
+          ? ' <span style="font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600;margin-left:2px;background:'
+            + (l.daysSinceCall === 0 ? '#16a34a22' : l.daysSinceCall <= 7 ? '#ca8a0422' : '#dc262622')
+            + ';color:'
+            + (l.daysSinceCall === 0 ? '#16a34a' : l.daysSinceCall <= 7 ? '#ca8a04' : '#dc2626')
+            + '">' + (l.daysSinceCall === 0 ? 'today' : l.daysSinceCall + 'd') + '</span>'
+          : '')
+      + '</td>'
       + '<td>' + lastContactBadge(l) + '</td>'
       + '<td onclick="event.stopPropagation()">' + callBtn + '</td>'
       + '</tr>';
