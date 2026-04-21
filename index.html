@@ -467,10 +467,11 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 
     <!-- Hidden filters kept for JS compatibility -->
     <div style="display:none">
-      <select id="mkt-filter-segmentation"><option value="">All Segmentations</option></select>
-      <select id="mkt-filter-status"><option value="">All Statuses</option></select>
-      <select id="mkt-filter-vendor"><option value="">All Vendors</option></select>
-      <select id="mkt-filter-email"><option value="yes">With Email Only</option></select>
+      <select id="mkt-filter-segmentation" onchange="refreshMktPreview()"><option value="">All Segmentations</option></select>
+      <select id="mkt-filter-status" onchange="refreshMktPreview()"><option value="">All Statuses</option></select>
+      <select id="mkt-filter-vendor" onchange="refreshMktPreview()"><option value="">All Vendors</option></select>
+      <select id="mkt-filter-tag" onchange="refreshMktPreview()"><option value="">All MKT Tags</option></select>
+      <select id="mkt-filter-email" onchange="refreshMktPreview()"><option value="yes">With Email Only</option></select>
     </div>
 
     <!-- Campaign Preview -->
