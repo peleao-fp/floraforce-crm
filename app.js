@@ -1980,7 +1980,7 @@ function getMktLeads() {
   const status    = document.getElementById('mkt-filter-status')?.value   || '';
   const vendor    = document.getElementById('mkt-filter-vendor')?.value   || '';
   const emailOnly = document.getElementById('mkt-filter-email')?.value    !== '';
-  const mktTag    = document.getElementById('mkt-filter-tag')?.value      || '';
+  const mktTag    = document.getElementById('mkt-filter-tag-visible')?.value || document.getElementById('mkt-filter-tag')?.value || '';
 
   return leads.filter(l => {
     if (pipeline && l.p !== pipeline)                              return false;
