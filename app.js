@@ -169,6 +169,7 @@ async function loadLeads() {
     address:     l.address     || '',
     website:     l.website     || '',
     instagram:   l.instagram   || '',
+    zip:         l.zip         || '',
     sl: l.sales_total ? {
       total:     parseFloat(l.sales_total)  || 0,
       count:     parseInt(l.sales_count)    || 0,
@@ -603,6 +604,8 @@ function applyFilters() {
   const type     = document.getElementById('filter-type')?.value || '';
   const state    = document.getElementById('filter-state')?.value || '';
   const owner    = document.getElementById('filter-owner')?.value || '';
+  const zipVal   = (document.getElementById('filter-zip')?.value || '').trim();
+  const zipMode  = document.getElementById('filter-zip-mode')?.value || 'starts';
   const pool     = getMyLeads();
   filteredLeads  = pool.filter(l => {
     if (activeStatus !== 'all' && l.cs !== activeStatus) return false;
@@ -610,6 +613,12 @@ function applyFilters() {
     if (type     && !(l.ty || '').includes(type))         return false;
     if (state    && l.st !== state)                        return false;
     if (owner    && (l.responsible || l.r) !== owner)     return false;
+    if (zipVal) {
+      const lz = (l.zip || '').trim();
+      if (zipMode === 'starts'   && !lz.startsWith(zipVal)) return false;
+      if (zipMode === 'ends'     && !lz.endsWith(zipVal))   return false;
+      if (zipMode === 'contains' && !lz.includes(zipVal))   return false;
+    }
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
@@ -1047,6 +1056,7 @@ async function renderEditableFields(lead) {
     + field('Email',          'em',          lead.em, 'email')
     + field('Phone',          'ph',          lead.ph, 'tel')
     + field('Address',        'address',     lead.address)
+    + field('Zip Code',       'zip',         lead.zip)
     + field('Instagram',      'instagram',   lead.instagram)
     + field('Website',        'website',     lead.website)
     + renderOwnerDropdown(lead.responsible || lead.r)
@@ -1099,6 +1109,7 @@ async function updateLeadField(input) {
       key === 'ph'        ? 'phone'     :
       key === 'ty'        ? 'type'      :
       key === 'address'   ? 'address'   :
+      key === 'zip'       ? 'zip'       :
       key === 'instagram' ? 'instagram' :
       key === 'website'   ? 'website'   : key
     ]: newVal }).eq('id', currentLead.id);
@@ -1691,7 +1702,7 @@ function exportCSV() {
   const isAdmin = currentProfile?.role === 'admin';
   const pool = isAdmin ? leads : getMyLeads();
   const rows = [
-    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
+    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'Zip', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
   ];
   pool.forEach(l => {
     rows.push([
@@ -1701,6 +1712,7 @@ function exportCSV() {
       l.em || '',
       l.ph || '',
       l.address || '',
+      l.zip || '',
       l.website || '',
       l.instagram || '',
       l.responsible || l.r || '',
@@ -2232,6 +2244,7 @@ function openNewLeadModal() {
         ${newLeadField('Type',      'nl-type',     'text',  false, 'Florist, Event Planner...')}
         ${newLeadField('State',     'nl-state',    'text',  false, 'e.g. Florida')}
         ${newLeadField('Address',   'nl-address',  'text',  false, '123 Main St, Miami FL...')}
+        ${newLeadField('Zip Code',  'nl-zip',      'text',  false, 'e.g. 33069')}
         ${newLeadField('Website',   'nl-website',  'text',  false, 'www.example.com')}
         ${newLeadField('Instagram', 'nl-instagram','text',  false, '@handle')}
       </div>
@@ -2266,6 +2279,7 @@ async function saveNewLead() {
   const type      = document.getElementById('nl-type')?.value.trim();
   const state     = document.getElementById('nl-state')?.value.trim();
   const address   = document.getElementById('nl-address')?.value.trim();
+  const zip       = document.getElementById('nl-zip')?.value.trim();
   const website   = document.getElementById('nl-website')?.value.trim();
   const instagram = document.getElementById('nl-instagram')?.value.trim();
 
@@ -2281,6 +2295,7 @@ async function saveNewLead() {
     type:        type      || null,
     state:       state     || null,
     address:     address   || null,
+    zip:         zip       || null,
     website:     website   || null,
     instagram:   instagram || null,
     responsible: currentProfile?.name || null,
@@ -2309,7 +2324,7 @@ async function saveNewLead() {
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
     mkt_tag: [],
-    address: address || '', website: website || '', instagram: instagram || ''
+    address: address || '', zip: zip || '', website: website || '', instagram: instagram || ''
   };
   leads.push(newLead);
 
@@ -2490,6 +2505,7 @@ function parseBulkCSV(text) {
     type:        idx('type'),
     state:       idx('state'),
     address:     idx('address'),
+    zip:         idx('zip'),
     instagram:   idx('instagram'),
     website:     idx('website'),
     status:      idx('status'),
@@ -2575,6 +2591,7 @@ function parseBulkCSV(text) {
     check('ty',          get(colMap.type),      lead.ty,                    'Type');
     check('st',          get(colMap.state),     lead.st,                    'State');
     check('address',     get(colMap.address),   lead.address,               'Address');
+    check('zip',         get(colMap.zip),        lead.zip,                   'Zip');
     check('instagram',   get(colMap.instagram), lead.instagram,             'Instagram');
     check('website',     get(colMap.website),   lead.website,               'Website');
 

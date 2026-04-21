@@ -176,6 +176,17 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
       <select class="filter-input filter-select" id="filter-state" onchange="applyFilters()"><option value="">All</option></select>
     </div>
     <div class="sidebar-section">
+      <div class="sidebar-label">Zip Code</div>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <select class="filter-input filter-select" id="filter-zip-mode" onchange="applyFilters()" style="width:90px;flex-shrink:0">
+          <option value="starts">Starts</option>
+          <option value="ends">Ends</option>
+          <option value="contains">Contains</option>
+        </select>
+        <input type="text" class="filter-input" id="filter-zip" placeholder="e.g. 331" oninput="applyFilters()" style="flex:1;min-width:0" maxlength="10">
+      </div>
+    </div>
+    <div class="sidebar-section">
       <div class="sidebar-label">Special Filters</div>
       <div class="filter-chips">
         <div class="chip" onclick="toggleSpecial(this,'priority')">⭐ Priority</div>
