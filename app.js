@@ -3031,6 +3031,7 @@ let currentQuote = null;
 let quoteItems = [];
 
 function openQuoteModal(leadId) {
+  window.editingQuoteId = null;
   const lead = leads.find(l => l.id === leadId);
   if (!lead) return;
   currentQuote = { lead_id: leadId, status: 'draft', items: [], discount: 0, total: 0, notes: '', valid_until: '' };
@@ -3043,6 +3044,33 @@ function closeQuoteModal() {
   document.getElementById('quote-modal').style.display = 'none';
   currentQuote = null;
   quoteItems = [];
+  window.editingQuoteId = null;
+}
+
+async function openEditQuoteModal(quoteId, leadId) {
+  const { data: q, error } = await sb.from('quotes').select('*').eq('id', quoteId).single();
+  if (error || !q) { showToast('❌ Could not load quote'); return; }
+  const lead = leads.find(l => l.id === q.lead_id);
+  if (!lead) { showToast('❌ Lead not found'); return; }
+
+  window.editingQuoteId = quoteId;
+  currentQuote = { lead_id: q.lead_id, status: q.status, items: q.items || [], discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '' };
+  quoteItems = q.items ? q.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) })) : [];
+
+  renderQuoteModal(lead);
+
+  // Pre-fill fields with existing data
+  const statusEl = document.getElementById('q-status');
+  const validEl  = document.getElementById('q-valid');
+  const discEl   = document.getElementById('q-discount');
+  const notesEl  = document.getElementById('q-notes');
+  if (statusEl) statusEl.value = q.status || 'draft';
+  if (validEl)  validEl.value  = q.valid_until ? q.valid_until.split('T')[0] : '';
+  if (discEl)   discEl.value   = q.discount || 0;
+  if (notesEl)  notesEl.value  = q.notes || '';
+
+  updateQuoteTotals();
+  document.getElementById('quote-modal').style.display = 'flex';
 }
 
 async function loadLeadQuotes(leadId) {
@@ -3076,7 +3104,8 @@ async function loadLeadQuotes(leadId) {
       + '</div>'
       + '<div style="display:flex;gap:6px">'
       + '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="downloadExistingQuote(\'' + q.id + '\')">📥 PDF</button>'
-      + '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="changeQuoteStatus(\'' + q.id + '\',\'' + leadId + '\')">✏️ Status</button>'
+      + '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="openEditQuoteModal(\'' + q.id + '\',\'' + leadId + '\')">✏️ Edit</button>'
+      + '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="changeQuoteStatus(\'' + q.id + '\',\'' + leadId + '\')">🔄 Status</button>'
       + '</div>'
       + '</div>';
   }).join('');
@@ -3120,7 +3149,7 @@ async function setQuoteStatus(quoteId, newStatus, leadId) {
 }
 
 function renderQuoteModal(lead) {
-  document.getElementById('quote-modal-title').textContent = '📄 New Quote';
+  document.getElementById('quote-modal-title').textContent = window.editingQuoteId ? '✏️ Edit Quote' : '📄 New Quote';
   document.getElementById('quote-modal-sub').textContent = lead.c + (lead.cn ? ' · ' + lead.cn : '');
 
   const today = new Date();
@@ -3176,7 +3205,7 @@ function renderQuoteModal(lead) {
   document.getElementById('quote-modal-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeQuoteModal()">Cancel</button>
     <button class="btn btn-ghost" onclick="saveAndDownloadQuote()" style="color:var(--info);border-color:var(--info)">📥 Save & Download PDF</button>
-    <button class="btn btn-primary" onclick="saveQuote()">💾 Save Quote</button>
+    <button class="btn btn-primary" onclick="saveQuote()">${window.editingQuoteId ? '💾 Update Quote' : '💾 Save Quote'}</button>
   `;
 }
 
@@ -3280,7 +3309,12 @@ async function saveQuote() {
     total
   };
 
-  const { data, error } = await sb.from('quotes').insert(quoteData).select().single();
+  let data, error;
+  if (window.editingQuoteId) {
+    ({ data, error } = await sb.from('quotes').update(quoteData).eq('id', window.editingQuoteId).select().single());
+  } else {
+    ({ data, error } = await sb.from('quotes').insert(quoteData).select().single());
+  }
   if (error) { showToast('❌ Error: ' + error.message); return; }
 
   // Add to lead timeline
@@ -3295,7 +3329,7 @@ async function saveQuote() {
   }
 
   logActivity(currentQuote.lead_id, lead?.c, 'quote_created', 'Quote $' + total.toFixed(2));
-  showToast('✅ Quote saved!');
+  showToast(window.editingQuoteId ? '✅ Quote updated!' : '✅ Quote saved!');
   const savedLeadId = currentQuote.lead_id;
   closeQuoteModal();
   // Reload quotes in modal if still open
