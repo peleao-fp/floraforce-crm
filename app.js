@@ -1949,12 +1949,17 @@ function getMktLeads() {
   const status    = document.getElementById('mkt-filter-status')?.value   || '';
   const vendor    = document.getElementById('mkt-filter-vendor')?.value   || '';
   const emailOnly = document.getElementById('mkt-filter-email')?.value    !== '';
+  const mktTag    = document.getElementById('mkt-filter-tag')?.value      || '';
 
   return leads.filter(l => {
     if (pipeline && l.p !== pipeline)                              return false;
     if (status   && l.cs !== status)                               return false;
     if (vendor   && (l.responsible || l.r) !== vendor)            return false;
     if (emailOnly && !l.em)                                        return false;
+    if (mktTag) {
+      const tags = Array.isArray(l.mkt_tag) ? l.mkt_tag : (l.mkt_tag ? [l.mkt_tag] : []);
+      if (!tags.includes(mktTag)) return false;
+    }
     return true;
   });
 }
