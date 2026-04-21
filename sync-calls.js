@@ -1,5 +1,5 @@
 // FloraForce — Intermedia Call Sync
-// Saves ALL calls (matched and unmatched) for full vendor call counting
+// Saves outbound calls only (matched and unmatched) for full vendor call counting
 const fetch = require('node-fetch');
 
 const INTERMEDIA_CLIENT_ID     = process.env.INTERMEDIA_CLIENT_ID     || '3jkwpsxZR04flEYCQUw';
@@ -45,8 +45,9 @@ async function getCallLogs(token) {
 
   if (!res.ok) throw new Error('Call logs failed: ' + res.status + ' ' + await res.text());
   const data  = await res.json();
-  const calls = data.calls || data.items || data.records || data.data || data.results || (Array.isArray(data) ? data : []);
-  console.log('📞 Retrieved', calls.length, 'calls');
+  const all   = data.calls || data.items || data.records || data.data || data.results || (Array.isArray(data) ? data : []);
+  const calls = all.filter(c => (c.direction || '').toLowerCase() === 'outbound');
+  console.log('📞 Retrieved', all.length, 'calls,', calls.length, 'outbound');
   if (calls.length > 0) {
     console.log('  Sample call:', JSON.stringify(calls[0]).substring(0, 250));
   }
