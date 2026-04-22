@@ -167,6 +167,7 @@ async function loadLeads() {
     em:          l.email       || '',
     ph:          l.phone       || '',
     address:     l.address     || '',
+    city:        l.city        || '',
     website:     l.website     || '',
     instagram:   l.instagram   || '',
     zip:         l.zip         || '',
@@ -646,8 +647,9 @@ function applyFilters() {
     if (state    && l.st !== state)                        return false;
     if (owner    && (l.responsible || l.r) !== owner)     return false;
     if (cityVal) {
+      const cityField = (l.city || '').toLowerCase();
       const ad = (l.address || '').toLowerCase();
-      if (!ad.includes(cityVal)) return false;
+      if (!cityField.includes(cityVal) && !ad.includes(cityVal)) return false;
     }
     if (zipConds.length) {
       const lz = (l.zip || '').trim();
@@ -863,7 +865,7 @@ function renderTable() {
     return '<tr class="' + (l.pr ? 'priority-row' : '') + (isEngaged ? ' mc-engaged' : '') + '" onclick="handleLeadRowClick(event,' + l.id + ')">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
-      + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
+      + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + (l.city ? ' · 📍 ' + esc(l.city) : '') + '</small></td>'
       + '<td style="font-size:11px">' + st + '</td>'
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
@@ -1413,6 +1415,7 @@ function renderKanban() {
     + vl.map(l =>
       '<div class="kanban-card" draggable="true" ondragstart="onDragStart(event,' + l.id + ')">'
       + '<div class="kanban-card-name">' + esc(l.c) + '</div>'
+      + (l.city ? '<div class="kanban-card-city" style="font-size:11px;color:var(--text3);margin-top:2px">📍 ' + esc(l.city) + '</div>' : '')
       + '<div class="kanban-card-state">' + (stateEmoji[l.cs]||'⚪') + ' ' + l.cs + '</div></div>'
     ).join('')
     + '</div></div>'
