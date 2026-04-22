@@ -121,6 +121,13 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
     </div>
     <div class="topbar-right">
       <span class="sync-indicator"><span class="sync-dot" id="sync-dot"></span><span id="sync-lbl">Synced</span></span>
+      <div class="notif-wrap">
+        <button class="notif-btn" id="btn-notifications" onclick="toggleNotifications(event)" title="Email campaign highlights">
+          <span class="notif-icon">🔔</span>
+          <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+        </button>
+        <div class="notif-dropdown" id="notif-dropdown" style="display:none"></div>
+      </div>
       <div class="user-chip"><span id="user-name">—</span>&nbsp;<span class="user-role" id="user-role">—</span></div>
       <button class="tab-btn" id="btn-admin" style="display:none" onclick="toggleAdminView()">🛡 Admin</button>
       <button class="tab-btn" id="btn-mkt" style="display:none" onclick="toggleMktView()">📧 MKT</button>
@@ -659,6 +666,6 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=202604221250"></script>
+<script src="app.js?v=202604221330"></script>
 </body>
 </html>
