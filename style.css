@@ -91,6 +91,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .btn-ghost{background:transparent;color:var(--text2);border-color:var(--border2)}
 .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
 .btn-ghost.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);font-weight:600}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
 .btn-danger{background:transparent;color:var(--danger);border-color:var(--danger)}
 .leads-table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:12px}
