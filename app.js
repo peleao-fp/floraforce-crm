@@ -1109,6 +1109,7 @@ async function renderEditableFields(lead) {
     + field('Email',          'em',          lead.em, 'email')
     + field('Phone',          'ph',          lead.ph, 'tel')
     + field('Address',        'address',     lead.address)
+    + field('City',           'city',        lead.city)
     + field('Zip Code',       'zip',         lead.zip)
     + field('Instagram',      'instagram',   lead.instagram)
     + field('Website',        'website',     lead.website)
