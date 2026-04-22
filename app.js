@@ -850,7 +850,7 @@ function renderTable() {
   document.getElementById('lc-total').textContent = getMyLeads().length.toLocaleString();
   const tbody = document.getElementById('leads-tbody');
   if (!filteredLeads.length) {
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
     return;
   }
   tbody.innerHTML = page.map(l => {
@@ -865,8 +865,11 @@ function renderTable() {
     return '<tr class="' + (l.pr ? 'priority-row' : '') + (isEngaged ? ' mc-engaged' : '') + '" onclick="handleLeadRowClick(event,' + l.id + ')">'
       + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
-      + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + (l.city ? ' · 📍 ' + esc(l.city) : '') + '</small></td>'
+      + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
+      + '<td style="font-size:11px;color:var(--text2)">' + esc(l.responsible || l.r || '—') + '</td>'
+      + '<td style="font-size:11px">' + (l.city ? esc(l.city) : '—') + '</td>'
       + '<td style="font-size:11px">' + st + '</td>'
+      + '<td style="font-size:11px;color:var(--text3)">' + (l.zip ? esc(l.zip) : '—') + '</td>'
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
       + '<td>' + tags + '</td>'
@@ -1754,7 +1757,7 @@ function exportCSV() {
   const isAdmin = currentProfile?.role === 'admin';
   const pool = isAdmin ? leads : getMyLeads();
   const rows = [
-    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'Zip', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
+    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'City', 'Zip', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
   ];
   pool.forEach(l => {
     rows.push([
@@ -1764,6 +1767,7 @@ function exportCSV() {
       l.em || '',
       l.ph || '',
       l.address || '',
+      l.city || '',
       l.zip || '',
       l.website || '',
       l.instagram || '',
