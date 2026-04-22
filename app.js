@@ -602,6 +602,9 @@ function toggleSpecial(el, val) {
   currentPage = 1;
   applyFilters();
 }
+function toggleHighlights(el) {
+  toggleSpecial(el, 'highlights');
+}
 function applyFilters() {
   const search   = document.getElementById('search-input')?.value.toLowerCase() || '';
   const pipeline = document.getElementById('filter-segmentation')?.value || '';
@@ -627,6 +630,7 @@ function applyFilters() {
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
     if (activeSpecials.has('no_contact') && l.lc)          return false;
+    if (activeSpecials.has('highlights') && !l.mc_engaged) return false;
     if (search) {
       const h = (l.c + ' ' + l.cn + ' ' + l.em).toLowerCase();
       if (!h.includes(search)) return false;

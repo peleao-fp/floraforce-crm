@@ -241,6 +241,7 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
           <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-ghost" onclick="sortBy('priority')">⭐ Priority</button>
             <button class="btn btn-ghost" onclick="sortBy('calls')">📞 Calls</button>
+            <button class="btn btn-ghost" id="btn-highlights" onclick="toggleHighlights(this)" title="Show leads that engaged with email campaigns">✨ Highlights</button>
             <button class="btn btn-ghost" onclick="sortBy('company')">🔤 A-Z</button>
             <button class="btn btn-ghost" onclick="sortBy('idle')">💤 No Contact</button>
             <button class="btn btn-ghost" onclick="exportCSV()" title="Export leads to CSV">📥 CSV</button>
@@ -658,6 +659,6 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=202604212044"></script>
+<script src="app.js?v=202604221200"></script>
 </body>
 </html>
