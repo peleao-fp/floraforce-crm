@@ -143,6 +143,29 @@ function startIdleTracking() {
   reset();
 }
 
+// ── CITY EXTRACTION ───────────────────────────────────────────
+function extractCityFromAddress(address) {
+  if (!address || typeof address !== 'string') return '';
+  const parts = address.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return '';
+  const stateZip = /^[A-Z]{2}(\s+\d{5}(-\d{4})?)?$/;
+  const zipOnly  = /^\d{5}(-\d{4})?$/;
+  let endIdx = parts.length - 1;
+  while (endIdx >= 0 && (stateZip.test(parts[endIdx]) || zipOnly.test(parts[endIdx]))) endIdx--;
+  if (endIdx >= 1) return parts[endIdx];
+  if (endIdx === 0 && parts.length >= 2) return parts[0];
+  return '';
+}
+
+async function backfillCities(queue) {
+  const CHUNK = 25;
+  for (let i = 0; i < queue.length; i += CHUNK) {
+    const chunk = queue.slice(i, i + CHUNK);
+    await Promise.all(chunk.map(u => sb.from('leads').update({ city: u.city }).eq('id', u.id)));
+  }
+  console.log('[city backfill] saved', queue.length, 'leads');
+}
+
 // ── LOAD LEADS ────────────────────────────────────────────────
 async function loadLeads() {
   let all = [];
@@ -156,7 +179,17 @@ async function loadLeads() {
     from += PAGE_SIZE;
     setLoader('Loading leads... ' + all.length, 55);
   }
-  leads = all.map(l => ({
+  const cityBackfillQueue = [];
+  leads = all.map(l => {
+    let city = l.city || '';
+    if (!city && l.address) {
+      const extracted = extractCityFromAddress(l.address);
+      if (extracted) {
+        city = extracted;
+        cityBackfillQueue.push({ id: l.id, city: extracted });
+      }
+    }
+    return {
     id:          l.id,
     c:           l.company     || '',
     p:           l.pipeline    || '',
@@ -167,6 +200,7 @@ async function loadLeads() {
     em:          l.email       || '',
     ph:          l.phone       || '',
     address:     l.address     || '',
+    city,
     website:     l.website     || '',
     instagram:   l.instagram   || '',
     zip:         l.zip         || '',
@@ -181,7 +215,9 @@ async function loadLeads() {
     lc: null, cv: false, cm: '', tl: [],
     responsible: l.responsible || '',
     mkt_tag: []
-  }));
+  };
+  });
+  if (cityBackfillQueue.length) backfillCities(cityBackfillQueue);
 }
 
 // ── LEAD STATES ───────────────────────────────────────────────
@@ -605,14 +641,39 @@ function toggleSpecial(el, val) {
 function toggleHighlights(el) {
   toggleSpecial(el, 'highlights');
 }
+function collectZipConditions() {
+  const rows = document.querySelectorAll('#zip-conditions .zip-cond-row');
+  const out = [];
+  rows.forEach(r => {
+    const value = (r.querySelector('.zip-cond-value')?.value || '').trim();
+    if (!value) return;
+    out.push({ mode: r.querySelector('.zip-cond-mode')?.value || 'starts', value });
+  });
+  return out;
+}
+function addZipCondition() {
+  const wrap = document.getElementById('zip-conditions');
+  if (!wrap) return;
+  const row = document.createElement('div');
+  row.className = 'zip-cond-row';
+  row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px';
+  row.innerHTML = '<select class="filter-input filter-select zip-cond-mode" onchange="applyFilters()" style="width:90px;flex-shrink:0">'
+    + '<option value="starts">Starts</option><option value="ends">Ends</option><option value="contains">Contains</option>'
+    + '</select>'
+    + '<input type="text" class="filter-input zip-cond-value" placeholder="..." oninput="applyFilters()" style="flex:1;min-width:0" maxlength="10">'
+    + '<button class="btn btn-ghost" onclick="this.parentElement.remove();applyFilters()" style="padding:0 8px;font-size:16px;line-height:1;height:28px" title="Remove">×</button>';
+  wrap.appendChild(row);
+}
+
 function applyFilters() {
   const search   = document.getElementById('search-input')?.value.toLowerCase() || '';
   const pipeline = document.getElementById('filter-segmentation')?.value || '';
   const type     = document.getElementById('filter-type')?.value || '';
   const state    = document.getElementById('filter-state')?.value || '';
   const owner    = document.getElementById('filter-owner')?.value || '';
-  const zipVal   = (document.getElementById('filter-zip')?.value || '').trim();
-  const zipMode  = document.getElementById('filter-zip-mode')?.value || 'starts';
+  const cityVal  = (document.getElementById('filter-city')?.value || '').trim().toLowerCase();
+  const zipLogic = document.getElementById('filter-zip-logic')?.value || 'and';
+  const zipConds = collectZipConditions();
   const pool     = getMyLeads();
   filteredLeads  = pool.filter(l => {
     if (activeStatus !== 'all' && l.cs !== activeStatus) return false;
@@ -620,11 +681,20 @@ function applyFilters() {
     if (type     && !(l.ty || '').includes(type))         return false;
     if (state    && l.st !== state)                        return false;
     if (owner    && (l.responsible || l.r) !== owner)     return false;
-    if (zipVal) {
+    if (cityVal) {
+      const cityField = (l.city || '').toLowerCase();
+      const ad = (l.address || '').toLowerCase();
+      if (!cityField.includes(cityVal) && !ad.includes(cityVal)) return false;
+    }
+    if (zipConds.length) {
       const lz = (l.zip || '').trim();
-      if (zipMode === 'starts'   && !lz.startsWith(zipVal)) return false;
-      if (zipMode === 'ends'     && !lz.endsWith(zipVal))   return false;
-      if (zipMode === 'contains' && !lz.includes(zipVal))   return false;
+      const tests = zipConds.map(c => {
+        if (c.mode === 'starts')   return lz.startsWith(c.value);
+        if (c.mode === 'ends')     return lz.endsWith(c.value);
+        if (c.mode === 'contains') return lz.includes(c.value);
+        return true;
+      });
+      if (zipLogic === 'or' ? !tests.some(Boolean) : !tests.every(Boolean)) return false;
     }
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
@@ -815,7 +885,7 @@ function renderTable() {
   document.getElementById('lc-total').textContent = getMyLeads().length.toLocaleString();
   const tbody = document.getElementById('leads-tbody');
   if (!filteredLeads.length) {
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
     return;
   }
   tbody.innerHTML = page.map(l => {
@@ -831,7 +901,10 @@ function renderTable() {
       + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
       + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
+      + '<td style="font-size:11px;color:var(--text2)">' + esc(l.responsible || l.r || '—') + '</td>'
+      + '<td style="font-size:11px">' + (l.city ? esc(l.city) : '—') + '</td>'
       + '<td style="font-size:11px">' + st + '</td>'
+      + '<td style="font-size:11px;color:var(--text3)">' + (l.zip ? esc(l.zip) : '—') + '</td>'
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
       + '<td>' + tags + '</td>'
@@ -1074,6 +1147,7 @@ async function renderEditableFields(lead) {
     + field('Email',          'em',          lead.em, 'email')
     + field('Phone',          'ph',          lead.ph, 'tel')
     + field('Address',        'address',     lead.address)
+    + field('City',           'city',        lead.city)
     + field('Zip Code',       'zip',         lead.zip)
     + field('Instagram',      'instagram',   lead.instagram)
     + field('Website',        'website',     lead.website)
@@ -1380,6 +1454,7 @@ function renderKanban() {
     + vl.map(l =>
       '<div class="kanban-card" draggable="true" ondragstart="onDragStart(event,' + l.id + ')">'
       + '<div class="kanban-card-name">' + esc(l.c) + '</div>'
+      + (l.city ? '<div class="kanban-card-city" style="font-size:11px;color:var(--text3);margin-top:2px">📍 ' + esc(l.city) + '</div>' : '')
       + '<div class="kanban-card-state">' + (stateEmoji[l.cs]||'⚪') + ' ' + l.cs + '</div></div>'
     ).join('')
     + '</div></div>'
@@ -1717,7 +1792,7 @@ function exportCSV() {
   const isAdmin = currentProfile?.role === 'admin';
   const pool = isAdmin ? leads : getMyLeads();
   const rows = [
-    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'Zip', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
+    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'City', 'Zip', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
   ];
   pool.forEach(l => {
     rows.push([
@@ -1727,6 +1802,7 @@ function exportCSV() {
       l.em || '',
       l.ph || '',
       l.address || '',
+      l.city || '',
       l.zip || '',
       l.website || '',
       l.instagram || '',

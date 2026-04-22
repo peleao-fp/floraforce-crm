@@ -186,15 +186,28 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
       <select class="filter-input filter-select" id="filter-state" onchange="applyFilters()"><option value="">All</option></select>
     </div>
     <div class="sidebar-section">
-      <div class="sidebar-label">Zip Code</div>
-      <div style="display:flex;gap:4px;align-items:center;">
-        <select class="filter-input filter-select" id="filter-zip-mode" onchange="applyFilters()" style="width:90px;flex-shrink:0">
-          <option value="starts">Starts</option>
-          <option value="ends">Ends</option>
-          <option value="contains">Contains</option>
+      <div class="sidebar-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Zip Code</span>
+        <select class="filter-input filter-select" id="filter-zip-logic" onchange="applyFilters()" style="width:64px;font-size:10px;padding:2px 4px;height:auto">
+          <option value="and">AND</option>
+          <option value="or">OR</option>
         </select>
-        <input type="text" class="filter-input" id="filter-zip" placeholder="e.g. 331" oninput="applyFilters()" style="flex:1;min-width:0" maxlength="10">
       </div>
+      <div id="zip-conditions">
+        <div class="zip-cond-row" style="display:flex;gap:4px;align-items:center;margin-bottom:4px">
+          <select class="filter-input filter-select zip-cond-mode" onchange="applyFilters()" style="width:90px;flex-shrink:0">
+            <option value="starts">Starts</option>
+            <option value="ends">Ends</option>
+            <option value="contains">Contains</option>
+          </select>
+          <input type="text" class="filter-input zip-cond-value" placeholder="e.g. 331" oninput="applyFilters()" style="flex:1;min-width:0" maxlength="10">
+        </div>
+      </div>
+      <button class="btn btn-ghost" onclick="addZipCondition()" style="font-size:11px;padding:4px 8px;margin-top:4px;width:100%">+ Add condition</button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">City</div>
+      <input type="text" class="filter-input" id="filter-city" placeholder="e.g. Pompano" oninput="applyFilters()">
     </div>
     <div class="sidebar-section">
       <div class="sidebar-label">Special Filters</div>
@@ -260,7 +273,10 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
               <th style="width:28px"><input type="checkbox" id="select-all-leads-th" onchange="toggleSelectAll(this)" style="cursor:pointer"></th>
               <th style="width:28px">⭐</th>
               <th>Company</th>
+              <th>Owner</th>
+              <th>City</th>
               <th>State</th>
+              <th>Zip</th>
               <th>Type</th>
               <th>Status</th>
               <th>Tags</th>
@@ -666,6 +682,6 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=202604221345"></script>
+<script src="app.js?v=202604221530"></script>
 </body>
 </html>
