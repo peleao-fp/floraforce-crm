@@ -90,6 +90,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .btn-primary:hover{background:var(--accent2)}
 .btn-ghost{background:transparent;color:var(--text2);border-color:var(--border2)}
 .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn-ghost.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);font-weight:600}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.notif-wrap{position:relative}
+.notif-btn{position:relative;background:transparent;border:1px solid var(--border2);color:var(--text2);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;transition:all .15s}
+.notif-btn:hover{border-color:var(--accent);color:var(--accent)}
+.notif-badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:2px 6px;min-width:18px;text-align:center;line-height:1}
+.notif-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.2);min-width:320px;max-width:380px;max-height:420px;overflow-y:auto;z-index:1000;padding:8px}
+.notif-item{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--border2)}
+.notif-item:last-child{border-bottom:none}
+.notif-item:hover{background:var(--surface2)}
+.notif-empty{padding:16px;text-align:center;color:var(--text3);font-size:12px}
+.notif-header{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;padding:6px 12px 8px;border-bottom:1px solid var(--border2);margin-bottom:4px}
 .btn-danger{background:transparent;color:var(--danger);border-color:var(--danger)}
 .leads-table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:12px}

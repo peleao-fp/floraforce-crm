@@ -602,6 +602,9 @@ function toggleSpecial(el, val) {
   currentPage = 1;
   applyFilters();
 }
+function toggleHighlights(el) {
+  toggleSpecial(el, 'highlights');
+}
 function applyFilters() {
   const search   = document.getElementById('search-input')?.value.toLowerCase() || '';
   const pipeline = document.getElementById('filter-segmentation')?.value || '';
@@ -627,6 +630,7 @@ function applyFilters() {
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
     if (activeSpecials.has('no_contact') && l.lc)          return false;
+    if (activeSpecials.has('highlights') && !l.mc_engaged) return false;
     if (search) {
       const h = (l.c + ' ' + l.cn + ' ' + l.em).toLowerCase();
       if (!h.includes(search)) return false;
@@ -644,6 +648,7 @@ function applyFilters() {
   renderPagination();
   updateMiniStats();
   updateTopbarStats();
+  updateNotificationBell();
 }
 function handleLeadRowClick(event, id) {
   // Don't open modal if clicking checkbox area
@@ -3109,6 +3114,25 @@ function closeQuoteModal() {
   window.editingQuoteId = null;
 }
 
+function splitQuoteItems(q) {
+  const all = Array.isArray(q?.items) ? q.items : [];
+  const realItems = [];
+  const embeddedExtras = [];
+  let meta = {};
+  for (const it of all) {
+    if (it && it._kind === 'extra') {
+      embeddedExtras.push({ name: it.name, amount: Number(it.amount) || 0, enabled: it.enabled !== false });
+    } else if (it && it._kind === 'meta') {
+      meta = { ...meta, ...it };
+      delete meta._kind;
+    } else {
+      realItems.push(it);
+    }
+  }
+  const extras = embeddedExtras.length ? embeddedExtras : (Array.isArray(q?.extra_charges) ? q.extra_charges : []);
+  return { items: realItems, extras, meta };
+}
+
 async function openEditQuoteModal(quoteId, leadId) {
   const { data: q, error } = await sb.from('quotes').select('*').eq('id', quoteId).single();
   if (error || !q) { showToast('❌ Could not load quote'); return; }
@@ -3116,9 +3140,10 @@ async function openEditQuoteModal(quoteId, leadId) {
   if (!lead) { showToast('❌ Lead not found'); return; }
 
   window.editingQuoteId = quoteId;
-  currentQuote = { lead_id: q.lead_id, status: q.status, items: q.items || [], discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '' };
-  quoteItems = q.items ? q.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) })) : [];
-  quoteExtraCharges = q.extra_charges ? q.extra_charges : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
+  const split = splitQuoteItems(q);
+  currentQuote = { lead_id: q.lead_id, status: q.status, items: split.items, discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '', po: split.meta.po || '' };
+  quoteItems = split.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) }));
+  quoteExtraCharges = split.extras.length ? split.extras : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
 
   renderQuoteModal(lead);
 
@@ -3131,6 +3156,8 @@ async function openEditQuoteModal(quoteId, leadId) {
   if (validEl)  validEl.value  = q.valid_until ? q.valid_until.split('T')[0] : '';
   if (discEl)   discEl.value   = q.discount || 0;
   if (notesEl)  notesEl.value  = q.notes || '';
+  const poEl = document.getElementById('q-po');
+  if (poEl)     poEl.value     = currentQuote.po || '';
 
   updateQuoteTotals();
   document.getElementById('quote-modal').style.display = 'flex';
@@ -3157,12 +3184,15 @@ async function loadLeadQuotes(leadId) {
     const date = new Date(q.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
     const color = statusColors[q.status] || 'var(--text3)';
     const emoji = statusEmoji[q.status] || '📄';
+    const qMeta = splitQuoteItems(q).meta;
+    const poTxt = qMeta.po ? ' · PO: ' + esc(qMeta.po) : '';
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">'
       + '<div style="flex:1">'
       + '<div style="font-size:12px;font-weight:600;color:var(--text)">' + emoji + ' $' + parseFloat(q.total || 0).toFixed(2)
       + ' <span style="font-size:10px;color:' + color + ';font-weight:500;text-transform:uppercase">' + q.status + '</span></div>'
       + '<div style="font-size:10px;color:var(--text3);margin-top:2px">' + date + ' · ' + esc(q.created_by_name || '—')
       + (q.valid_until ? ' · Valid until: ' + new Date(q.valid_until).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '')
+      + poTxt
       + '</div>'
       + '</div>'
       + '<div style="display:flex;gap:6px">'
@@ -3236,6 +3266,10 @@ function renderQuoteModal(lead) {
               <option value="declined">Declined</option>
             </select>
           </div>
+        </div>
+        <div class="info-item">
+          <div class="info-item-lbl">PO #</div>
+          <div class="info-item-val"><input type="text" class="edit-field" id="q-po" placeholder="PO number..."></div>
         </div>
       </div>
     </div>
@@ -3362,7 +3396,7 @@ function renderQuoteExtraCharges() {
         + '<label for="ec-chk-' + i + '" style="font-size:12px;min-width:130px;cursor:pointer;color:var(--text2)">' + esc(c.name) + '</label>'
         + '<span style="font-size:12px;color:var(--text3)">$</span>'
         + '<input type="number" class="edit-field" value="' + (c.amount || 0) + '" min="0" step="0.01" style="width:90px" oninput="updateExtraCharge(' + i + ',this.value)" ' + (!c.enabled ? 'disabled' : '') + '>'
-        + (c.enabled ? '<span style="font-size:11px;color:var(--accent);font-weight:600">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>' : '')
+        + '<span id="ec-sum-' + i + '" style="font-size:11px;color:var(--accent);font-weight:600;' + (c.enabled ? '' : 'display:none') + '">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>'
         + '</div>'
       ).join('')
     + '</div>';
@@ -3374,7 +3408,8 @@ function toggleExtraCharge(i, enabled) {
 }
 function updateExtraCharge(i, val) {
   quoteExtraCharges[i].amount = parseFloat(val) || 0;
-  renderQuoteExtraCharges();
+  const sumEl = document.getElementById('ec-sum-' + i);
+  if (sumEl) sumEl.textContent = '+$' + quoteExtraCharges[i].amount.toFixed(2);
   updateQuoteTotals();
 }
 function updateQuoteTotals() {
@@ -3392,6 +3427,12 @@ async function saveQuote() {
   const { subtotal, discount, total } = updateQuoteTotals();
   const lead = leads.find(l => l.id === currentQuote.lead_id);
 
+  const embeddedExtras = quoteExtraCharges
+    .filter(c => c.enabled)
+    .map(c => ({ _kind: 'extra', name: c.name, amount: Number(c.amount) || 0, enabled: true }));
+  const poVal = (document.getElementById('q-po')?.value || '').trim();
+  const metaEntry = poVal ? [{ _kind: 'meta', po: poVal }] : [];
+
   const quoteData = {
     lead_id:        currentQuote.lead_id,
     created_by:     currentUser.id,
@@ -3400,8 +3441,7 @@ async function saveQuote() {
     valid_until:    document.getElementById('q-valid').value || null,
     notes:          document.getElementById('q-notes').value,
     discount,
-    items:          quoteItems,
-    extra_charges:  quoteExtraCharges.filter(c => c.enabled),
+    items:          [...quoteItems, ...embeddedExtras, ...metaEntry],
     total
   };
 
@@ -3441,7 +3481,11 @@ async function saveAndDownloadQuote() {
 }
 
 function generateQuotePDF(quote, lead) {
-  const subtotal = quote.items.reduce((s, i) => s + (i.subtotal || 0), 0);
+  const pdfSplit = splitQuoteItems(quote);
+  const pdfItems = pdfSplit.items.map(i => ({ ...i, subtotal: (i.subtotal != null ? i.subtotal : (i.qty || 0) * (i.price || 0)) }));
+  const pdfExtras = pdfSplit.extras;
+  const pdfPo = pdfSplit.meta.po || '';
+  const subtotal = pdfItems.reduce((s, i) => s + (i.subtotal || 0), 0);
   const discount = quote.discount || 0;
   const total = quote.total || 0;
 
@@ -3518,7 +3562,7 @@ function generateQuotePDF(quote, lead) {
       <img src="https://fullpot.com/wp-content/uploads/logo.png" alt="Full Pot of Flowers">
     </div>
     <div class="header-company">
-      <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: _________</div>
+      <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: ${pdfPo ? esc(pdfPo) : '_________'}</div>
       <div class="co-name">FULL POT OF FLOWERS</div>
       <div class="co-addr">1516 SW 13 CT</div>
       <div class="co-addr">POMPANO BEACH, FL 33069</div>
@@ -3558,6 +3602,7 @@ function generateQuotePDF(quote, lead) {
     <div><span>Sales Rep: </span><strong>${esc(quote.created_by_name || '—')}</strong></div>
     <div><span>Date: </span><strong>${quoteDateStr}</strong></div>
     <div><span>Quote #: </span><strong>${quote.id?.substring(0,8).toUpperCase()}</strong></div>
+    ${pdfPo ? '<div><span>PO #: </span><strong>' + esc(pdfPo) + '</strong></div>' : ''}
   </div>
 
   <!-- ITEMS TABLE -->
@@ -3572,7 +3617,7 @@ function generateQuotePDF(quote, lead) {
       </tr>
     </thead>
     <tbody>
-      ${(quote.items || []).map(item => `
+      ${pdfItems.map(item => `
         <tr>
           <td>${esc(item.name || '—')}</td>
           <td style="text-align:right">${item.qty}</td>
@@ -3588,7 +3633,7 @@ function generateQuotePDF(quote, lead) {
   <div class="totals">
     <div class="total-row"><span class="total-label">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
     ${discount > 0 ? '<div class="total-row"><span class="total-label">Discount (' + discount + '%)</span><span>-$' + (subtotal * discount / 100).toFixed(2) + '</span></div>' : ''}
-    ${(quote.extra_charges || []).filter(c => c.enabled && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
+    ${pdfExtras.filter(c => c.enabled !== false && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
     <div class="total-row final"><span class="total-label">TOTAL</span><span>$${total.toFixed(2)}</span></div>
   </div>
 
@@ -3692,6 +3737,71 @@ async function syncMailchimpEngagement() {
   }
 }
 
+function getHighlightedLeads() {
+  return getMyLeads().filter(l => l.mc_engaged && !l.mc_acknowledged);
+}
+function updateNotificationBell() {
+  const badge = document.getElementById('notif-badge');
+  if (!badge) return;
+  const count = getHighlightedLeads().length;
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+  const dd = document.getElementById('notif-dropdown');
+  if (dd && dd.style.display !== 'none') renderNotificationDropdown();
+}
+function renderNotificationDropdown() {
+  const dd = document.getElementById('notif-dropdown');
+  if (!dd) return;
+  const list = getHighlightedLeads();
+  if (!list.length) {
+    dd.innerHTML = '<div class="notif-empty">No new campaign engagements.<br>You\'re all caught up ✨</div>';
+    return;
+  }
+  dd.innerHTML = '<div class="notif-header">✨ Highlights — ' + list.length + ' lead' + (list.length > 1 ? 's' : '') + '</div>'
+    + list.map(l => {
+      const eng = l.mc_engaged || {};
+      const opens = eng.opens || 0;
+      const clicks = eng.clicks || 0;
+      const camp = (eng.campaigns && eng.campaigns[0]) ? esc(eng.campaigns[0]) : '';
+      return '<div class="notif-item" onclick="openHighlightLead(' + l.id + ')">'
+        + '<div style="font-size:13px;font-weight:600;color:var(--text)">' + esc(l.c || '—') + '</div>'
+        + '<div style="font-size:11px;color:var(--text2)">' + (l.cn ? esc(l.cn) + ' · ' : '') + opens + ' opens · ' + clicks + ' clicks</div>'
+        + (camp ? '<div style="font-size:10px;color:var(--text3);margin-top:2px">📧 ' + camp + '</div>' : '')
+        + '</div>';
+    }).join('');
+}
+function toggleNotifications(evt) {
+  if (evt) evt.stopPropagation();
+  const dd = document.getElementById('notif-dropdown');
+  if (!dd) return;
+  if (dd.style.display === 'none') {
+    renderNotificationDropdown();
+    dd.style.display = 'block';
+    setTimeout(() => document.addEventListener('click', closeNotifOnOutsideClick), 0);
+  } else {
+    dd.style.display = 'none';
+    document.removeEventListener('click', closeNotifOnOutsideClick);
+  }
+}
+function closeNotifOnOutsideClick(e) {
+  const wrap = document.querySelector('.notif-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    const dd = document.getElementById('notif-dropdown');
+    if (dd) dd.style.display = 'none';
+    document.removeEventListener('click', closeNotifOnOutsideClick);
+  }
+}
+function openHighlightLead(id) {
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) dd.style.display = 'none';
+  document.removeEventListener('click', closeNotifOnOutsideClick);
+  openModal(id);
+}
+
 async function acknowledgeMcEngagement(leadId) {
   const lead = leads.find(l => l.id === leadId);
   if (!lead) return;
@@ -3721,6 +3831,7 @@ async function acknowledgeMcEngagement(leadId) {
   logActivity(lead.id, lead.c, 'mc_engagement', 'Acknowledged email engagement');
   showToast('✅ Acknowledged — status updated');
   applyFilters();
+  updateNotificationBell();
 }
 
 // ── START ─────────────────────────────────────────────────────
