@@ -3113,6 +3113,21 @@ function closeQuoteModal() {
   window.editingQuoteId = null;
 }
 
+function splitQuoteItems(q) {
+  const all = Array.isArray(q?.items) ? q.items : [];
+  const realItems = [];
+  const embeddedExtras = [];
+  for (const it of all) {
+    if (it && it._kind === 'extra') {
+      embeddedExtras.push({ name: it.name, amount: Number(it.amount) || 0, enabled: it.enabled !== false });
+    } else {
+      realItems.push(it);
+    }
+  }
+  const extras = embeddedExtras.length ? embeddedExtras : (Array.isArray(q?.extra_charges) ? q.extra_charges : []);
+  return { items: realItems, extras };
+}
+
 async function openEditQuoteModal(quoteId, leadId) {
   const { data: q, error } = await sb.from('quotes').select('*').eq('id', quoteId).single();
   if (error || !q) { showToast('❌ Could not load quote'); return; }
@@ -3120,9 +3135,10 @@ async function openEditQuoteModal(quoteId, leadId) {
   if (!lead) { showToast('❌ Lead not found'); return; }
 
   window.editingQuoteId = quoteId;
-  currentQuote = { lead_id: q.lead_id, status: q.status, items: q.items || [], discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '' };
-  quoteItems = q.items ? q.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) })) : [];
-  quoteExtraCharges = q.extra_charges ? q.extra_charges : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
+  const split = splitQuoteItems(q);
+  currentQuote = { lead_id: q.lead_id, status: q.status, items: split.items, discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '' };
+  quoteItems = split.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) }));
+  quoteExtraCharges = split.extras.length ? split.extras : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
 
   renderQuoteModal(lead);
 
@@ -3396,6 +3412,10 @@ async function saveQuote() {
   const { subtotal, discount, total } = updateQuoteTotals();
   const lead = leads.find(l => l.id === currentQuote.lead_id);
 
+  const embeddedExtras = quoteExtraCharges
+    .filter(c => c.enabled)
+    .map(c => ({ _kind: 'extra', name: c.name, amount: Number(c.amount) || 0, enabled: true }));
+
   const quoteData = {
     lead_id:        currentQuote.lead_id,
     created_by:     currentUser.id,
@@ -3404,8 +3424,7 @@ async function saveQuote() {
     valid_until:    document.getElementById('q-valid').value || null,
     notes:          document.getElementById('q-notes').value,
     discount,
-    items:          quoteItems,
-    extra_charges:  quoteExtraCharges.filter(c => c.enabled),
+    items:          [...quoteItems, ...embeddedExtras],
     total
   };
 
@@ -3445,7 +3464,10 @@ async function saveAndDownloadQuote() {
 }
 
 function generateQuotePDF(quote, lead) {
-  const subtotal = quote.items.reduce((s, i) => s + (i.subtotal || 0), 0);
+  const pdfSplit = splitQuoteItems(quote);
+  const pdfItems = pdfSplit.items.map(i => ({ ...i, subtotal: (i.subtotal != null ? i.subtotal : (i.qty || 0) * (i.price || 0)) }));
+  const pdfExtras = pdfSplit.extras;
+  const subtotal = pdfItems.reduce((s, i) => s + (i.subtotal || 0), 0);
   const discount = quote.discount || 0;
   const total = quote.total || 0;
 
@@ -3576,7 +3598,7 @@ function generateQuotePDF(quote, lead) {
       </tr>
     </thead>
     <tbody>
-      ${(quote.items || []).map(item => `
+      ${pdfItems.map(item => `
         <tr>
           <td>${esc(item.name || '—')}</td>
           <td style="text-align:right">${item.qty}</td>
@@ -3592,7 +3614,7 @@ function generateQuotePDF(quote, lead) {
   <div class="totals">
     <div class="total-row"><span class="total-label">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
     ${discount > 0 ? '<div class="total-row"><span class="total-label">Discount (' + discount + '%)</span><span>-$' + (subtotal * discount / 100).toFixed(2) + '</span></div>' : ''}
-    ${(quote.extra_charges || []).filter(c => c.enabled && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
+    ${pdfExtras.filter(c => c.enabled !== false && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
     <div class="total-row final"><span class="total-label">TOTAL</span><span>$${total.toFixed(2)}</span></div>
   </div>
 
