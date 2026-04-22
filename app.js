@@ -3382,7 +3382,7 @@ function renderQuoteExtraCharges() {
         + '<label for="ec-chk-' + i + '" style="font-size:12px;min-width:130px;cursor:pointer;color:var(--text2)">' + esc(c.name) + '</label>'
         + '<span style="font-size:12px;color:var(--text3)">$</span>'
         + '<input type="number" class="edit-field" value="' + (c.amount || 0) + '" min="0" step="0.01" style="width:90px" oninput="updateExtraCharge(' + i + ',this.value)" ' + (!c.enabled ? 'disabled' : '') + '>'
-        + (c.enabled ? '<span style="font-size:11px;color:var(--accent);font-weight:600">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>' : '')
+        + '<span id="ec-sum-' + i + '" style="font-size:11px;color:var(--accent);font-weight:600;' + (c.enabled ? '' : 'display:none') + '">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>'
         + '</div>'
       ).join('')
     + '</div>';
@@ -3394,7 +3394,8 @@ function toggleExtraCharge(i, enabled) {
 }
 function updateExtraCharge(i, val) {
   quoteExtraCharges[i].amount = parseFloat(val) || 0;
-  renderQuoteExtraCharges();
+  const sumEl = document.getElementById('ec-sum-' + i);
+  if (sumEl) sumEl.textContent = '+$' + quoteExtraCharges[i].amount.toFixed(2);
   updateQuoteTotals();
 }
 function updateQuoteTotals() {
