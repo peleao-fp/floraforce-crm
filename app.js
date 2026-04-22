@@ -143,6 +143,29 @@ function startIdleTracking() {
   reset();
 }
 
+// ── CITY EXTRACTION ───────────────────────────────────────────
+function extractCityFromAddress(address) {
+  if (!address || typeof address !== 'string') return '';
+  const parts = address.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return '';
+  const stateZip = /^[A-Z]{2}(\s+\d{5}(-\d{4})?)?$/;
+  const zipOnly  = /^\d{5}(-\d{4})?$/;
+  let endIdx = parts.length - 1;
+  while (endIdx >= 0 && (stateZip.test(parts[endIdx]) || zipOnly.test(parts[endIdx]))) endIdx--;
+  if (endIdx >= 1) return parts[endIdx];
+  if (endIdx === 0 && parts.length >= 2) return parts[0];
+  return '';
+}
+
+async function backfillCities(queue) {
+  const CHUNK = 25;
+  for (let i = 0; i < queue.length; i += CHUNK) {
+    const chunk = queue.slice(i, i + CHUNK);
+    await Promise.all(chunk.map(u => sb.from('leads').update({ city: u.city }).eq('id', u.id)));
+  }
+  console.log('[city backfill] saved', queue.length, 'leads');
+}
+
 // ── LOAD LEADS ────────────────────────────────────────────────
 async function loadLeads() {
   let all = [];
@@ -156,7 +179,17 @@ async function loadLeads() {
     from += PAGE_SIZE;
     setLoader('Loading leads... ' + all.length, 55);
   }
-  leads = all.map(l => ({
+  const cityBackfillQueue = [];
+  leads = all.map(l => {
+    let city = l.city || '';
+    if (!city && l.address) {
+      const extracted = extractCityFromAddress(l.address);
+      if (extracted) {
+        city = extracted;
+        cityBackfillQueue.push({ id: l.id, city: extracted });
+      }
+    }
+    return {
     id:          l.id,
     c:           l.company     || '',
     p:           l.pipeline    || '',
@@ -167,7 +200,7 @@ async function loadLeads() {
     em:          l.email       || '',
     ph:          l.phone       || '',
     address:     l.address     || '',
-    city:        l.city        || '',
+    city,
     website:     l.website     || '',
     instagram:   l.instagram   || '',
     zip:         l.zip         || '',
@@ -182,7 +215,9 @@ async function loadLeads() {
     lc: null, cv: false, cm: '', tl: [],
     responsible: l.responsible || '',
     mkt_tag: []
-  }));
+  };
+  });
+  if (cityBackfillQueue.length) backfillCities(cityBackfillQueue);
 }
 
 // ── LEAD STATES ───────────────────────────────────────────────
