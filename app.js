@@ -3562,7 +3562,7 @@ function generateQuotePDF(quote, lead) {
       <img src="https://fullpot.com/wp-content/uploads/logo.png" alt="Full Pot of Flowers">
     </div>
     <div class="header-company">
-      <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: _________</div>
+      <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: ${pdfPo ? esc(pdfPo) : '_________'}</div>
       <div class="co-name">FULL POT OF FLOWERS</div>
       <div class="co-addr">1516 SW 13 CT</div>
       <div class="co-addr">POMPANO BEACH, FL 33069</div>
