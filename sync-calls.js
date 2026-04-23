@@ -55,7 +55,7 @@ async function getCallLogs(token) {
 }
 
 async function getLeads() {
-  const url = SUPABASE_URL + '/rest/v1/leads?select=id,phone,company&phone=neq.null&limit=5000';
+  const url = SUPABASE_URL + '/rest/v1/leads?select=id,phone,phone2,company&limit=5000';
   const res = await fetch(url, { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY } });
   if (!res.ok) throw new Error('Get leads failed: ' + res.status);
   return await res.json();
@@ -199,8 +199,11 @@ async function main() {
     const phoneMap = new Map();
     leads.forEach(l => {
       // Handle multiple phones separated by ; or ,
-      const phones = String(l.phone || '').split(/[;,]/).map(p => p.trim()).filter(Boolean);
-      phones.forEach(ph => {
+      const allPhones = [
+        ...String(l.phone || '').split(/[;,]/).map(p => p.trim()),
+        ...String(l.phone2 || '').split(/[;,]/).map(p => p.trim()),
+      ].filter(Boolean);
+      allPhones.forEach(ph => {
         const n = normalizePhone(ph);
         if (n) phoneMap.set(n, { id: l.id, company: l.company });
       });
