@@ -976,6 +976,8 @@ async function openModal(id) {
   currentLead = lead;
   document.getElementById('modal-company').textContent = lead.c;
   document.getElementById('modal-sub').textContent = [lead.cn, lead.st ? (lead.st.split(' - ')[1] || '') : ''].filter(Boolean).join(', ') || '—';
+  document.getElementById('modal-title-actions').innerHTML =
+    '<button class="btn btn-ghost" onclick="openLeadInNewTab(' + lead.id + ')" title="Open this lead in a new tab" style="padding:4px 10px;font-size:11px">🔗 New tab</button>';
 
   const salesHtml = lead.sl
     ? '<div class="sales-card"><div class="sales-card-val">$' + lead.sl.total.toFixed(2) + '</div><div class="sales-card-sub">' + lead.sl.count + ' orders · Rep: ' + esc(lead.sl.rep) + ' · Last: ' + esc(lead.sl.last_date) + '</div></div>'
@@ -1040,7 +1042,6 @@ async function openModal(id) {
   document.getElementById('modal-footer').innerHTML =
     deleteBtn
     + quoteBtn
-    + '<button class="btn btn-ghost" onclick="openLeadInNewTab(' + lead.id + ')" title="Open this lead in a new tab">🔗 New tab</button>'
     + '<button class="btn btn-ghost" onclick="registerCall()">📞 Log Call</button>'
     + '<button class="btn btn-primary" onclick="saveModal()">💾 Save</button>';
 
@@ -2386,6 +2387,7 @@ function showToast(msg) {
 function openNewLeadModal() {
   document.getElementById('modal-company').textContent = 'New Lead';
   document.getElementById('modal-sub').textContent = 'Fill in the details below';
+  document.getElementById('modal-title-actions').innerHTML = '';
   document.getElementById('modal-body').innerHTML = `
     <div class="modal-section">
       <div class="modal-section-title">📝 Lead Information</div>
@@ -2497,6 +2499,7 @@ function openEditUserModal(userId) {
 
   document.getElementById('modal-company').textContent = '✏️ Edit User';
   document.getElementById('modal-sub').textContent = user.email || user.name;
+  document.getElementById('modal-title-actions').innerHTML = '';
   document.getElementById('modal-body').innerHTML = `
     <div class="modal-section">
       <div class="modal-section-title">👤 User Information</div>

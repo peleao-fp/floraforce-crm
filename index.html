@@ -656,7 +656,10 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-header">
       <div>
-        <div class="modal-title" id="modal-company">—</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="modal-title" id="modal-company">—</div>
+          <span id="modal-title-actions"></span>
+        </div>
         <div class="modal-subtitle" id="modal-sub">—</div>
       </div>
       <button class="modal-close" onclick="closeModal()">✕</button>
@@ -682,6 +685,6 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=202604231600"></script>
+<script src="app.js?v=202604231645"></script>
 </body>
 </html>
