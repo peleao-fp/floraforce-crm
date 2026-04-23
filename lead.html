@@ -81,6 +81,14 @@ function linkInstagram(v) {
   }
   return '<a href="https://instagram.com/' + esc(handle) + '" target="_blank" rel="noopener">@' + esc(handle) + '</a>';
 }
+function linkFacebook(v) {
+  const raw = String(v).trim();
+  if (/^https?:\/\//i.test(raw)) {
+    return '<a href="' + esc(raw) + '" target="_blank" rel="noopener">' + esc(raw) + '</a>';
+  }
+  const slug = raw.replace(/^facebook\.com\//i, '').replace(/^fb\.com\//i, '').replace(/^\/+/, '');
+  return '<a href="https://facebook.com/' + esc(slug) + '" target="_blank" rel="noopener">' + esc(raw) + '</a>';
+}
 
 function fmtDateTime(iso) {
   if (!iso) return '';
@@ -146,6 +154,7 @@ async function main() {
         ${field('Phone', lead.phone, linkPhone)}
         ${field('Website', lead.website, linkWebsite)}
         ${field('Instagram', lead.instagram, linkInstagram)}
+        ${field('Facebook', lead.facebook, linkFacebook)}
       </div>
     </div>
 

@@ -4,6 +4,7 @@ const SUPA_KEY = 'sb_publishable_bSn29xCCTZYvTsE7uXptZg_17eYrqr5';
 
 let sb = null;
 let hasCityColumn = true;
+let hasFacebookColumn = true;
 let currentUser = null, currentProfile = null;
 let leads = [], filteredLeads = [];
 let currentPage = 1;
@@ -81,9 +82,11 @@ async function loadApp(user) {
   currentProfile = profile;
 
   await detectCityColumn();
+  await detectFacebookColumn();
 
   setLoader('Loading leads...', 50);
   await loadLeads();
+  await migrateFacebookFromInstagram();
 
   setLoader('Loading activity...', 75);
   await loadLeadStates(); // loads intermedia call counts into window._callsByProfile
@@ -168,6 +171,43 @@ async function detectCityColumn() {
   }
 }
 
+async function detectFacebookColumn() {
+  const { error } = await sb.from('leads').select('facebook').limit(1);
+  if (error && /facebook/i.test(error.message) && /does not exist/i.test(error.message)) {
+    hasFacebookColumn = false;
+    console.warn('[schema] leads.facebook column missing. Run: ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS facebook text;');
+  }
+}
+
+function looksLikeFacebook(v) {
+  if (!v) return false;
+  const s = String(v).toLowerCase();
+  return /facebook\.com|fb\.com|^\s*facebook\b|^\s*fb[\/:\s]/.test(s);
+}
+
+async function migrateFacebookFromInstagram() {
+  if (!hasFacebookColumn) return;
+  const queue = [];
+  leads.forEach(l => {
+    const ig = (l.instagram || '').trim();
+    if (ig && looksLikeFacebook(ig) && !l.facebook) {
+      l.facebook = ig;
+      l.instagram = '';
+      queue.push({ id: l.id, facebook: ig });
+    }
+  });
+  if (!queue.length) return;
+  console.log('[fb migrate] moving', queue.length, 'rows from instagram -> facebook');
+  const CHUNK = 25;
+  for (let i = 0; i < queue.length; i += CHUNK) {
+    const chunk = queue.slice(i, i + CHUNK);
+    await Promise.all(chunk.map(u =>
+      sb.from('leads').update({ facebook: u.facebook, instagram: '' }).eq('id', u.id)
+    ));
+  }
+  console.log('[fb migrate] done');
+}
+
 async function backfillCities(queue) {
   if (!hasCityColumn) return;
   const CHUNK = 25;
@@ -215,6 +255,7 @@ async function loadLeads() {
     city,
     website:     l.website     || '',
     instagram:   l.instagram   || '',
+    facebook:    l.facebook    || '',
     zip:         l.zip         || '',
     sl: l.sales_total ? {
       total:     parseFloat(l.sales_total)  || 0,
@@ -1164,6 +1205,7 @@ async function renderEditableFields(lead) {
     + field('City',           'city',        lead.city)
     + field('Zip Code',       'zip',         lead.zip)
     + field('Instagram',      'instagram',   lead.instagram)
+    + field('Facebook',       'facebook',    lead.facebook)
     + field('Website',        'website',     lead.website)
     + renderOwnerDropdown(lead.responsible || lead.r)
     + field('Type',           'ty',          lead.ty)
@@ -1211,6 +1253,9 @@ async function updateLeadField(input) {
     if (key === 'city' && !hasCityColumn) {
       showToast('⚠️ City column missing in database — run the migration (see console).');
       console.warn('[schema] Cannot persist city: run `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS city text;` in Supabase.');
+    } else if (key === 'facebook' && !hasFacebookColumn) {
+      showToast('⚠️ Facebook column missing in database — run the migration (see console).');
+      console.warn('[schema] Cannot persist facebook: run `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS facebook text;` in Supabase.');
     } else {
       const { error } = await sb.from('leads').update({ [
         key === 'c'         ? 'company'   :
@@ -1222,6 +1267,7 @@ async function updateLeadField(input) {
         key === 'city'      ? 'city'      :
         key === 'zip'       ? 'zip'       :
         key === 'instagram' ? 'instagram' :
+        key === 'facebook'  ? 'facebook'  :
         key === 'website'   ? 'website'   : key
       ]: newVal }).eq('id', currentLead.id);
       if (error) console.warn('leads update error:', error.message);
@@ -1812,7 +1858,7 @@ function exportCSV() {
   const isAdmin = currentProfile?.role === 'admin';
   const pool = isAdmin ? leads : getMyLeads();
   const rows = [
-    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'City', 'Zip', 'Website', 'Instagram', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
+    ['ID', 'Company', 'Contact', 'Email', 'Phone', 'Address', 'City', 'Zip', 'Website', 'Instagram', 'Facebook', 'Owner', 'Segmentation', 'Type', 'Status', 'State', 'Calls', 'Last Contact', 'Tags', 'MKT Tag']
   ];
   pool.forEach(l => {
     rows.push([
@@ -1826,6 +1872,7 @@ function exportCSV() {
       l.zip || '',
       l.website || '',
       l.instagram || '',
+      l.facebook || '',
       l.responsible || l.r || '',
       l.p || '',
       l.ty || '',
@@ -2403,6 +2450,7 @@ function openNewLeadModal() {
         ${newLeadField('Zip Code',  'nl-zip',      'text',  false, 'e.g. 33069')}
         ${newLeadField('Website',   'nl-website',  'text',  false, 'www.example.com')}
         ${newLeadField('Instagram', 'nl-instagram','text',  false, '@handle')}
+        ${newLeadField('Facebook',  'nl-facebook', 'text',  false, 'facebook.com/page')}
       </div>
     </div>
     <div class="modal-section">
@@ -2439,6 +2487,7 @@ async function saveNewLead() {
   const zip       = document.getElementById('nl-zip')?.value.trim();
   const website   = document.getElementById('nl-website')?.value.trim();
   const instagram = document.getElementById('nl-instagram')?.value.trim();
+  const facebook  = document.getElementById('nl-facebook')?.value.trim();
 
   const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
   const newId = maxId + 1;
@@ -2459,6 +2508,7 @@ async function saveNewLead() {
     pipeline:    'New Lead'
   };
   if (hasCityColumn) newLeadRow.city = city || null;
+  if (hasFacebookColumn) newLeadRow.facebook = facebook || null;
   const { error } = await sb.from('leads').insert(newLeadRow);
   if (error) { showToast('❌ Error: ' + error.message); return; }
 
@@ -2483,7 +2533,7 @@ async function saveNewLead() {
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
     mkt_tag: [],
-    address: address || '', city: city || '', zip: zip || '', website: website || '', instagram: instagram || ''
+    address: address || '', city: city || '', zip: zip || '', website: website || '', instagram: instagram || '', facebook: facebook || ''
   };
   leads.push(newLead);
 
@@ -2673,6 +2723,7 @@ function parseBulkCSV(text) {
     city:        idx('city'),
     zip:         idx('zip'),
     instagram:   idx('instagram'),
+    facebook:    idx('facebook'),
     website:     idx('website'),
     status:      idx('status'),
     tags:        idx('tags'),
@@ -2719,6 +2770,7 @@ function parseBulkCSV(text) {
         city:        get(colMap.city),
         zip:         get(colMap.zip),
         instagram:   get(colMap.instagram),
+        facebook:    get(colMap.facebook),
         website:     get(colMap.website),
       };
       const csvStatus = get(colMap.status);
@@ -2762,6 +2814,7 @@ function parseBulkCSV(text) {
     check('city',        get(colMap.city),      lead.city,                  'City');
     check('zip',         get(colMap.zip),        lead.zip,                   'Zip');
     check('instagram',   get(colMap.instagram), lead.instagram,             'Instagram');
+    check('facebook',    get(colMap.facebook),  lead.facebook,              'Facebook');
     check('website',     get(colMap.website),   lead.website,               'Website');
 
     const csvStatus = get(colMap.status);
@@ -2894,6 +2947,7 @@ async function applyBulkImport() {
         website:     d.website    || null,
       };
       if (hasCityColumn) newRow.city = d.city || null;
+      if (hasFacebookColumn) newRow.facebook = d.facebook || null;
       const { error } = await sb.from('leads').insert(newRow);
       if (error) throw error;
 
@@ -2905,7 +2959,7 @@ async function applyBulkImport() {
         cc: 0, lc: null, cv: false, cm: '', tl: [],
         responsible: d.responsible || '', mkt_tag: r.mktTags || [],
         address: d.address || '', city: d.city || '', zip: d.zip || '',
-        instagram: d.instagram || '', website: d.website || ''
+        instagram: d.instagram || '', facebook: d.facebook || '', website: d.website || ''
       };
 
       await sb.from('lead_states').insert({
@@ -2948,6 +3002,7 @@ async function applyBulkImport() {
       if (c.city && hasCityColumn) leadsUpdate.city = c.city;
       if (c.zip)         leadsUpdate.zip         = c.zip;
       if (c.instagram)   leadsUpdate.instagram   = c.instagram;
+      if (c.facebook && hasFacebookColumn) leadsUpdate.facebook = c.facebook;
       if (c.website)     leadsUpdate.website     = c.website;
 
       if (Object.keys(leadsUpdate).length > 0) {
