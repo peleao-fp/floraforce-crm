@@ -3,6 +3,7 @@ const SUPA_URL = 'https://zsgoocrqhzndghpseqtj.supabase.co';
 const SUPA_KEY = 'sb_publishable_bSn29xCCTZYvTsE7uXptZg_17eYrqr5';
 
 let sb = null;
+let hasCityColumn = true;
 let currentUser = null, currentProfile = null;
 let leads = [], filteredLeads = [];
 let currentPage = 1;
@@ -78,6 +79,8 @@ async function loadApp(user) {
   setLoader('Loading profile...', 30);
   const { data: profile } = await sb.from('profiles').select('*').eq('id', user.id).single();
   currentProfile = profile;
+
+  await detectCityColumn();
 
   setLoader('Loading leads...', 50);
   await loadLeads();
@@ -157,7 +160,16 @@ function extractCityFromAddress(address) {
   return '';
 }
 
+async function detectCityColumn() {
+  const { error } = await sb.from('leads').select('city').limit(1);
+  if (error && /city/i.test(error.message) && /does not exist/i.test(error.message)) {
+    hasCityColumn = false;
+    console.warn('[schema] leads.city column missing — city will be kept client-side only. Run: ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS city text;');
+  }
+}
+
 async function backfillCities(queue) {
+  if (!hasCityColumn) return;
   const CHUNK = 25;
   for (let i = 0; i < queue.length; i += CHUNK) {
     const chunk = queue.slice(i, i + CHUNK);
@@ -186,7 +198,7 @@ async function loadLeads() {
       const extracted = extractCityFromAddress(l.address);
       if (extracted) {
         city = extracted;
-        cityBackfillQueue.push({ id: l.id, city: extracted });
+        if (hasCityColumn) cityBackfillQueue.push({ id: l.id, city: extracted });
       }
     }
     return {
@@ -1194,19 +1206,24 @@ async function updateLeadField(input) {
     logActivity(currentLead.id, currentLead.c, 'transfer', (oldVal||'Unassigned') + ' → ' + (newVal||'Unassigned'));
     showToast('🔀 Reassigned to ' + (newVal || 'Unassigned'));
   } else {
-    const { error } = await sb.from('leads').update({ [
-      key === 'c'         ? 'company'   :
-      key === 'cn'        ? 'contact'   :
-      key === 'em'        ? 'email'     :
-      key === 'ph'        ? 'phone'     :
-      key === 'ty'        ? 'type'      :
-      key === 'address'   ? 'address'   :
-      key === 'city'      ? 'city'      :
-      key === 'zip'       ? 'zip'       :
-      key === 'instagram' ? 'instagram' :
-      key === 'website'   ? 'website'   : key
-    ]: newVal }).eq('id', currentLead.id);
-    if (error) console.warn('leads update error:', error.message);
+    if (key === 'city' && !hasCityColumn) {
+      showToast('⚠️ City column missing in database — run the migration (see console).');
+      console.warn('[schema] Cannot persist city: run `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS city text;` in Supabase.');
+    } else {
+      const { error } = await sb.from('leads').update({ [
+        key === 'c'         ? 'company'   :
+        key === 'cn'        ? 'contact'   :
+        key === 'em'        ? 'email'     :
+        key === 'ph'        ? 'phone'     :
+        key === 'ty'        ? 'type'      :
+        key === 'address'   ? 'address'   :
+        key === 'city'      ? 'city'      :
+        key === 'zip'       ? 'zip'       :
+        key === 'instagram' ? 'instagram' :
+        key === 'website'   ? 'website'   : key
+      ]: newVal }).eq('id', currentLead.id);
+      if (error) console.warn('leads update error:', error.message);
+    }
     await saveLeadState(currentLead);
     logActivity(currentLead.id, currentLead.c, 'field_edit', key + ': "' + oldVal + '" → "' + newVal + '"');
     showToast('✏️ ' + key + ' updated');
@@ -2423,7 +2440,7 @@ async function saveNewLead() {
   const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
   const newId = maxId + 1;
 
-  const { error } = await sb.from('leads').insert({
+  const newLeadRow = {
     id:          newId,
     company:     company,
     contact:     contact   || null,
@@ -2432,13 +2449,14 @@ async function saveNewLead() {
     type:        type      || null,
     state:       state     || null,
     address:     address   || null,
-    city:        city      || null,
     zip:         zip       || null,
     website:     website   || null,
     instagram:   instagram || null,
     responsible: currentProfile?.name || null,
     pipeline:    'New Lead'
-  });
+  };
+  if (hasCityColumn) newLeadRow.city = city || null;
+  const { error } = await sb.from('leads').insert(newLeadRow);
   if (error) { showToast('❌ Error: ' + error.message); return; }
 
   await sb.from('lead_states').insert({
@@ -2851,7 +2869,7 @@ async function applyBulkImport() {
       const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
       const newId = maxId + 1;
 
-      const { error } = await sb.from('leads').insert({
+      const newRow = {
         id:          newId,
         company:     d.company,
         contact:     d.contact    || null,
@@ -2862,11 +2880,12 @@ async function applyBulkImport() {
         type:        d.type       || null,
         state:       d.state      || null,
         address:     d.address    || null,
-        city:        d.city       || null,
         zip:         d.zip        || null,
         instagram:   d.instagram  || null,
         website:     d.website    || null,
-      });
+      };
+      if (hasCityColumn) newRow.city = d.city || null;
+      const { error } = await sb.from('leads').insert(newRow);
       if (error) throw error;
 
       const newLead = {
@@ -2917,7 +2936,7 @@ async function applyBulkImport() {
       if (c.ty)          leadsUpdate.type        = c.ty;
       if (c.st)          leadsUpdate.state       = c.st;
       if (c.address)     leadsUpdate.address     = c.address;
-      if (c.city)        leadsUpdate.city        = c.city;
+      if (c.city && hasCityColumn) leadsUpdate.city = c.city;
       if (c.zip)         leadsUpdate.zip         = c.zip;
       if (c.instagram)   leadsUpdate.instagram   = c.instagram;
       if (c.website)     leadsUpdate.website     = c.website;
