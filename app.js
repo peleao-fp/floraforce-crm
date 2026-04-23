@@ -3,6 +3,7 @@ const SUPA_URL = 'https://zsgoocrqhzndghpseqtj.supabase.co';
 const SUPA_KEY = 'sb_publishable_bSn29xCCTZYvTsE7uXptZg_17eYrqr5';
 
 let sb = null;
+let hasCityColumn = true;
 let currentUser = null, currentProfile = null;
 let leads = [], filteredLeads = [];
 let currentPage = 1;
@@ -78,6 +79,8 @@ async function loadApp(user) {
   setLoader('Loading profile...', 30);
   const { data: profile } = await sb.from('profiles').select('*').eq('id', user.id).single();
   currentProfile = profile;
+
+  await detectCityColumn();
 
   setLoader('Loading leads...', 50);
   await loadLeads();
@@ -157,7 +160,16 @@ function extractCityFromAddress(address) {
   return '';
 }
 
+async function detectCityColumn() {
+  const { error } = await sb.from('leads').select('city').limit(1);
+  if (error && /city/i.test(error.message) && /does not exist/i.test(error.message)) {
+    hasCityColumn = false;
+    console.warn('[schema] leads.city column missing — city will be kept client-side only. Run: ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS city text;');
+  }
+}
+
 async function backfillCities(queue) {
+  if (!hasCityColumn) return;
   const CHUNK = 25;
   for (let i = 0; i < queue.length; i += CHUNK) {
     const chunk = queue.slice(i, i + CHUNK);
@@ -186,7 +198,7 @@ async function loadLeads() {
       const extracted = extractCityFromAddress(l.address);
       if (extracted) {
         city = extracted;
-        cityBackfillQueue.push({ id: l.id, city: extracted });
+        if (hasCityColumn) cityBackfillQueue.push({ id: l.id, city: extracted });
       }
     }
     return {
@@ -1194,18 +1206,24 @@ async function updateLeadField(input) {
     logActivity(currentLead.id, currentLead.c, 'transfer', (oldVal||'Unassigned') + ' → ' + (newVal||'Unassigned'));
     showToast('🔀 Reassigned to ' + (newVal || 'Unassigned'));
   } else {
-    const { error } = await sb.from('leads').update({ [
-      key === 'c'         ? 'company'   :
-      key === 'cn'        ? 'contact'   :
-      key === 'em'        ? 'email'     :
-      key === 'ph'        ? 'phone'     :
-      key === 'ty'        ? 'type'      :
-      key === 'address'   ? 'address'   :
-      key === 'zip'       ? 'zip'       :
-      key === 'instagram' ? 'instagram' :
-      key === 'website'   ? 'website'   : key
-    ]: newVal }).eq('id', currentLead.id);
-    if (error) console.warn('leads update error:', error.message);
+    if (key === 'city' && !hasCityColumn) {
+      showToast('⚠️ City column missing in database — run the migration (see console).');
+      console.warn('[schema] Cannot persist city: run `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS city text;` in Supabase.');
+    } else {
+      const { error } = await sb.from('leads').update({ [
+        key === 'c'         ? 'company'   :
+        key === 'cn'        ? 'contact'   :
+        key === 'em'        ? 'email'     :
+        key === 'ph'        ? 'phone'     :
+        key === 'ty'        ? 'type'      :
+        key === 'address'   ? 'address'   :
+        key === 'city'      ? 'city'      :
+        key === 'zip'       ? 'zip'       :
+        key === 'instagram' ? 'instagram' :
+        key === 'website'   ? 'website'   : key
+      ]: newVal }).eq('id', currentLead.id);
+      if (error) console.warn('leads update error:', error.message);
+    }
     await saveLeadState(currentLead);
     logActivity(currentLead.id, currentLead.c, 'field_edit', key + ': "' + oldVal + '" → "' + newVal + '"');
     showToast('✏️ ' + key + ' updated');
@@ -2378,6 +2396,7 @@ function openNewLeadModal() {
         ${newLeadField('Type',      'nl-type',     'text',  false, 'Florist, Event Planner...')}
         ${newLeadField('State',     'nl-state',    'text',  false, 'e.g. Florida')}
         ${newLeadField('Address',   'nl-address',  'text',  false, '123 Main St, Miami FL...')}
+        ${newLeadField('City',      'nl-city',     'text',  false, 'e.g. Miami')}
         ${newLeadField('Zip Code',  'nl-zip',      'text',  false, 'e.g. 33069')}
         ${newLeadField('Website',   'nl-website',  'text',  false, 'www.example.com')}
         ${newLeadField('Instagram', 'nl-instagram','text',  false, '@handle')}
@@ -2413,6 +2432,7 @@ async function saveNewLead() {
   const type      = document.getElementById('nl-type')?.value.trim();
   const state     = document.getElementById('nl-state')?.value.trim();
   const address   = document.getElementById('nl-address')?.value.trim();
+  const city      = document.getElementById('nl-city')?.value.trim();
   const zip       = document.getElementById('nl-zip')?.value.trim();
   const website   = document.getElementById('nl-website')?.value.trim();
   const instagram = document.getElementById('nl-instagram')?.value.trim();
@@ -2420,7 +2440,7 @@ async function saveNewLead() {
   const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
   const newId = maxId + 1;
 
-  const { error } = await sb.from('leads').insert({
+  const newLeadRow = {
     id:          newId,
     company:     company,
     contact:     contact   || null,
@@ -2434,7 +2454,9 @@ async function saveNewLead() {
     instagram:   instagram || null,
     responsible: currentProfile?.name || null,
     pipeline:    'New Lead'
-  });
+  };
+  if (hasCityColumn) newLeadRow.city = city || null;
+  const { error } = await sb.from('leads').insert(newLeadRow);
   if (error) { showToast('❌ Error: ' + error.message); return; }
 
   await sb.from('lead_states').insert({
@@ -2458,7 +2480,7 @@ async function saveNewLead() {
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
     mkt_tag: [],
-    address: address || '', zip: zip || '', website: website || '', instagram: instagram || ''
+    address: address || '', city: city || '', zip: zip || '', website: website || '', instagram: instagram || ''
   };
   leads.push(newLead);
 
@@ -2639,6 +2661,7 @@ function parseBulkCSV(text) {
     type:        idx('type'),
     state:       idx('state'),
     address:     idx('address'),
+    city:        idx('city'),
     zip:         idx('zip'),
     instagram:   idx('instagram'),
     website:     idx('website'),
@@ -2684,6 +2707,8 @@ function parseBulkCSV(text) {
         type:        get(colMap.type),
         state:       get(colMap.state),
         address:     get(colMap.address),
+        city:        get(colMap.city),
+        zip:         get(colMap.zip),
         instagram:   get(colMap.instagram),
         website:     get(colMap.website),
       };
@@ -2725,6 +2750,7 @@ function parseBulkCSV(text) {
     check('ty',          get(colMap.type),      lead.ty,                    'Type');
     check('st',          get(colMap.state),     lead.st,                    'State');
     check('address',     get(colMap.address),   lead.address,               'Address');
+    check('city',        get(colMap.city),      lead.city,                  'City');
     check('zip',         get(colMap.zip),        lead.zip,                   'Zip');
     check('instagram',   get(colMap.instagram), lead.instagram,             'Instagram');
     check('website',     get(colMap.website),   lead.website,               'Website');
@@ -2843,7 +2869,7 @@ async function applyBulkImport() {
       const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
       const newId = maxId + 1;
 
-      const { error } = await sb.from('leads').insert({
+      const newRow = {
         id:          newId,
         company:     d.company,
         contact:     d.contact    || null,
@@ -2854,9 +2880,12 @@ async function applyBulkImport() {
         type:        d.type       || null,
         state:       d.state      || null,
         address:     d.address    || null,
+        zip:         d.zip        || null,
         instagram:   d.instagram  || null,
         website:     d.website    || null,
-      });
+      };
+      if (hasCityColumn) newRow.city = d.city || null;
+      const { error } = await sb.from('leads').insert(newRow);
       if (error) throw error;
 
       const newLead = {
@@ -2866,7 +2895,8 @@ async function applyBulkImport() {
         cs: r.status || 'novo', tg: r.tags || [], pr: false,
         cc: 0, lc: null, cv: false, cm: '', tl: [],
         responsible: d.responsible || '', mkt_tag: r.mktTags || [],
-        address: d.address || '', instagram: d.instagram || '', website: d.website || ''
+        address: d.address || '', city: d.city || '', zip: d.zip || '',
+        instagram: d.instagram || '', website: d.website || ''
       };
 
       await sb.from('lead_states').insert({
@@ -2906,11 +2936,14 @@ async function applyBulkImport() {
       if (c.ty)          leadsUpdate.type        = c.ty;
       if (c.st)          leadsUpdate.state       = c.st;
       if (c.address)     leadsUpdate.address     = c.address;
+      if (c.city && hasCityColumn) leadsUpdate.city = c.city;
+      if (c.zip)         leadsUpdate.zip         = c.zip;
       if (c.instagram)   leadsUpdate.instagram   = c.instagram;
       if (c.website)     leadsUpdate.website     = c.website;
 
       if (Object.keys(leadsUpdate).length > 0) {
-        await sb.from('leads').update(leadsUpdate).eq('id', lead.id);
+        const { error: upErr } = await sb.from('leads').update(leadsUpdate).eq('id', lead.id);
+        if (upErr) throw upErr;
       }
       Object.assign(lead, c);
       await saveLeadState(lead);
