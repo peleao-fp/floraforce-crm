@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lead · FloraForce CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+body { padding: 28px 36px; max-width: 1100px; margin: 0 auto; }
+.lead-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 4px; flex-wrap: wrap; }
+.lead-title { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; color: var(--text); letter-spacing: -.5px; margin: 0; }
+.lead-sub { color: var(--text3); font-size: 13px; }
+.back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text3); text-decoration: none; font-size: 12px; margin-bottom: 20px; border: 1px solid var(--border2); padding: 6px 12px; border-radius: 8px; background: var(--surface); transition: all .15s; }
+.back-link:hover { color: var(--accent); border-color: var(--accent); }
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
+.section-title { font-family: 'Syne', sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text3); margin: 0 0 14px; font-weight: 700; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 24px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--text3); font-weight: 600; }
+.field-val { font-size: 14px; color: var(--text); word-break: break-word; }
+.field-val a { color: var(--accent); text-decoration: none; }
+.field-val a:hover { text-decoration: underline; }
+.field-val.empty { color: var(--text3); font-style: italic; font-size: 13px; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: var(--accent-dim); color: var(--accent); border: 1px solid var(--border2); }
+.pill.muted { background: var(--surface2); color: var(--text3); }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.timeline-entry { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.timeline-entry:last-child { border-bottom: none; }
+.timeline-meta { font-size: 11px; color: var(--text3); margin-bottom: 3px; }
+.timeline-text { font-size: 13px; color: var(--text); white-space: pre-wrap; }
+.notes-box { background: var(--bg); border: 1px solid var(--border2); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--text2); white-space: pre-wrap; min-height: 20px; }
+.status-msg { padding: 40px; text-align: center; color: var(--text3); font-size: 14px; }
+.btn-link { color: var(--accent); text-decoration: none; }
+.btn-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<a href="index.html" class="back-link">← Back to CRM</a>
+
+<div id="content">
+  <div class="status-msg">Loading...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPA_URL = 'https://zsgoocrqhzndghpseqtj.supabase.co';
+const SUPA_KEY = 'sb_publishable_bSn29xCCTZYvTsE7uXptZg_17eYrqr5';
+const sb = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function val(v, formatter) {
+  if (v === null || v === undefined || v === '') {
+    return '<span class="field-val empty">—</span>';
+  }
+  if (formatter) return '<span class="field-val">' + formatter(v) + '</span>';
+  return '<span class="field-val">' + esc(v) + '</span>';
+}
+
+function field(label, v, formatter) {
+  return '<div class="field"><span class="field-lbl">' + esc(label) + '</span>'
+    + val(v, formatter) + '</div>';
+}
+
+function linkEmail(v)   { return '<a href="mailto:' + esc(v) + '">' + esc(v) + '</a>'; }
+function linkPhone(v)   { return '<a href="tel:' + esc(String(v).replace(/\s+/g,'')) + '">' + esc(v) + '</a>'; }
+function linkWebsite(v) {
+  const url = /^https?:\/\//i.test(v) ? v : 'https://' + v;
+  return '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(v) + '</a>';
+}
+function linkInstagram(v) {
+  const handle = String(v).trim().replace(/^@/, '');
+  if (/^https?:\/\//i.test(v)) {
+    return '<a href="' + esc(v) + '" target="_blank" rel="noopener">' + esc(v) + '</a>';
+  }
+  return '<a href="https://instagram.com/' + esc(handle) + '" target="_blank" rel="noopener">@' + esc(handle) + '</a>';
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('en-US'); } catch (_) { return iso; }
+}
+
+function renderError(msg) {
+  document.getElementById('content').innerHTML =
+    '<div class="status-msg">' + esc(msg) + '</div>';
+}
+
+async function main() {
+  const params = new URLSearchParams(location.search);
+  const idRaw = params.get('id');
+  if (!idRaw) { renderError('No lead ID provided in URL.'); return; }
+  const id = parseInt(idRaw, 10);
+  if (Number.isNaN(id)) { renderError('Invalid lead ID: ' + idRaw); return; }
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) {
+    renderError('Not signed in. Please open the main CRM first, log in, and try again.');
+    return;
+  }
+
+  const [leadRes, stateRes, activityRes] = await Promise.all([
+    sb.from('leads').select('*').eq('id', id).maybeSingle(),
+    sb.from('lead_states').select('*').eq('lead_id', id).maybeSingle(),
+    sb.from('activity_log').select('*').eq('lead_id', id).order('created_at', { ascending: false }).limit(50),
+  ]);
+
+  if (leadRes.error) { renderError('Error loading lead: ' + leadRes.error.message); return; }
+  const lead = leadRes.data;
+  if (!lead) { renderError('Lead #' + id + ' not found.'); return; }
+
+  const state = stateRes.data || {};
+  const activity = activityRes.data || [];
+  document.title = 'Lead · ' + (lead.company || ('#' + lead.id));
+
+  const timeline = Array.isArray(state.timeline) ? state.timeline : [];
+  const tags = Array.isArray(state.tags) ? state.tags : [];
+  let mktTag = state.mkt_tag;
+  if (typeof mktTag === 'string') {
+    try { mktTag = JSON.parse(mktTag); } catch (_) { mktTag = [mktTag]; }
+  }
+  if (!Array.isArray(mktTag)) mktTag = mktTag ? [mktTag] : [];
+
+  const statusLabels = { novo: '🆕 New', contatado: '📞 Contacted', proposta: '📝 Proposal', cliente: '✅ Customer' };
+  const statusDisplay = statusLabels[state.cs] || state.cs || '—';
+
+  document.getElementById('content').innerHTML = `
+    <div class="lead-header">
+      <h1 class="lead-title">${esc(lead.company || 'Lead #' + lead.id)}</h1>
+      <span class="pill">${esc(statusDisplay)}</span>
+      ${state.priority ? '<span class="pill" style="background:rgba(251,191,36,.15);color:var(--warn)">⭐ Priority</span>' : ''}
+      <span class="lead-sub">ID #${esc(lead.id)} · Owner: ${esc(lead.responsible || '—')}</span>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Contact</h2>
+      <div class="grid">
+        ${field('Contact person', lead.contact)}
+        ${field('Email', lead.email, linkEmail)}
+        ${field('Phone', lead.phone, linkPhone)}
+        ${field('Website', lead.website, linkWebsite)}
+        ${field('Instagram', lead.instagram, linkInstagram)}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Location</h2>
+      <div class="grid">
+        ${field('Address', lead.address)}
+        ${field('City', lead.city)}
+        ${field('State', lead.state)}
+        ${field('Zip', lead.zip)}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Classification</h2>
+      <div class="grid">
+        ${field('Segmentation', lead.pipeline)}
+        ${field('Type', lead.type)}
+        ${field('Owner', lead.responsible)}
+        ${field('Call count', state.call_count || 0)}
+        ${field('Last call', state.last_call ? fmtDateTime(state.last_call) : null)}
+        ${field('MKT Tags', mktTag.length ? mktTag.join(', ') : null)}
+      </div>
+      ${tags.length ? '<div style="margin-top:14px"><span class="field-lbl">Tags</span><div class="tag-list" style="margin-top:6px">'
+        + tags.map(t => '<span class="pill muted">' + esc(t) + '</span>').join('') + '</div></div>' : ''}
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Notes</h2>
+      <div class="notes-box">${state.notes ? esc(state.notes) : '<span style="color:var(--text3);font-style:italic">No notes.</span>'}</div>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Timeline (${timeline.length})</h2>
+      ${timeline.length
+        ? timeline.slice().reverse().map(t => `
+          <div class="timeline-entry">
+            <div class="timeline-meta">${esc(fmtDateTime(t.ts))} · ${esc(t.v || '—')}</div>
+            <div class="timeline-text">${esc(t.txt || '')}</div>
+          </div>`).join('')
+        : '<div style="color:var(--text3);font-size:13px;font-style:italic">No timeline entries.</div>'}
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Activity log (latest ${activity.length})</h2>
+      ${activity.length
+        ? activity.map(a => `
+          <div class="timeline-entry">
+            <div class="timeline-meta">${esc(fmtDateTime(a.created_at))} · ${esc(a.user_name || '—')} · ${esc(a.action || '')}</div>
+            <div class="timeline-text">${esc(a.detail || '')}</div>
+          </div>`).join('')
+        : '<div style="color:var(--text3);font-size:13px;font-style:italic">No activity yet.</div>'}
+    </div>
+
+    <div style="color:var(--text3);font-size:11px;text-align:center;padding:16px 0">
+      Read-only view. To edit, <a class="btn-link" href="index.html">open the main CRM</a> and click this lead.
+    </div>
+  `;
+}
+
+main().catch(e => {
+  console.error(e);
+  renderError('Unexpected error: ' + (e.message || e));
+});
+</script>
+</body>
+</html>

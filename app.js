@@ -1040,6 +1040,7 @@ async function openModal(id) {
   document.getElementById('modal-footer').innerHTML =
     deleteBtn
     + quoteBtn
+    + '<button class="btn btn-ghost" onclick="openLeadInNewTab(' + lead.id + ')" title="Open this lead in a new tab">🔗 New tab</button>'
     + '<button class="btn btn-ghost" onclick="registerCall()">📞 Log Call</button>'
     + '<button class="btn btn-primary" onclick="saveModal()">💾 Save</button>';
 
@@ -2578,6 +2579,11 @@ async function deleteUser(userId, userName) {
   showToast('✅ "' + userName + '" removed from CRM');
   logActivity(null, null, 'field_edit', 'Removed user: ' + userName);
   await loadAdminData();
+}
+
+// ── OPEN LEAD IN NEW TAB ───────────────────────────────────────
+function openLeadInNewTab(id) {
+  window.open('lead.html?id=' + encodeURIComponent(id), '_blank', 'noopener');
 }
 
 // ── DELETE LEAD ────────────────────────────────────────────────
