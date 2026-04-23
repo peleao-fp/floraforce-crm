@@ -166,6 +166,8 @@ async function loadLeads() {
     cn:          l.contact     || '',
     em:          l.email       || '',
     ph:          l.phone       || '',
+    ph2:         l.phone2      || '',
+    oi:          l.other_info  || '',
     address:     l.address     || '',
     website:     l.website     || '',
     instagram:   l.instagram   || '',
@@ -819,6 +821,7 @@ function renderTable() {
     const st      = l.st ? (l.st.split(' - ')[1] || l.st) : '—';
     const callBtn = l.ph
       ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
+        + (l.ph2 ? '<a href="tel:' + l.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none;margin-left:2px" title="' + esc(l.ph2) + '">📞2</a>' : '')
       : '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;opacity:.3" disabled>📞</button>';
     const isEngaged = l.mc_engaged && !l.mc_acknowledged;
     const mcBadge = isEngaged ? '<span class="mc-badge">📧 MC</span> ' : '';
@@ -899,7 +902,10 @@ async function openModal(id) {
       : '<span style="color:' + (days > 7 ? 'var(--danger)' : 'var(--warn)') + '">Last contact: <strong>' + days + ' day' + (days > 1 ? 's' : '') + ' ago</strong></span>';
 
   const phoneHtml = lead.ph
-    ? '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 Call: ' + esc(lead.ph) + '</a>'
+    ? '<div style="display:flex;flex-wrap:wrap;gap:8px">'
+      + '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph) + '</a>'
+      + (lead.ph2 ? '<a href="tel:' + lead.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph2) + '</a>' : '')
+      + '</div>'
     : '<span style="color:var(--text3);font-size:12px">No phone number</span>';
 
   const statusBtns = ['novo','contatado','proposta','cliente'].map(s => {
@@ -1068,6 +1074,8 @@ async function renderEditableFields(lead) {
     + field('Contact',        'cn',          lead.cn)
     + field('Email',          'em',          lead.em, 'email')
     + field('Phone',          'ph',          lead.ph, 'tel')
+    + field('Phone 2',        'ph2',         lead.ph2, 'tel')
+    + field('Other Info',     'oi',          lead.oi)
     + field('Address',        'address',     lead.address)
     + field('Zip Code',       'zip',         lead.zip)
     + field('Instagram',      'instagram',   lead.instagram)
@@ -1120,6 +1128,8 @@ async function updateLeadField(input) {
       key === 'cn'        ? 'contact'   :
       key === 'em'        ? 'email'     :
       key === 'ph'        ? 'phone'     :
+      key === 'ph2'       ? 'phone2'    :
+      key === 'oi'        ? 'other_info':
       key === 'ty'        ? 'type'      :
       key === 'address'   ? 'address'   :
       key === 'zip'       ? 'zip'       :
@@ -2294,6 +2304,8 @@ function openNewLeadModal() {
         ${newLeadField('Contact',   'nl-contact',  'text')}
         ${newLeadField('Email',     'nl-email',    'email')}
         ${newLeadField('Phone',     'nl-phone',    'tel')}
+        ${newLeadField('Phone 2',   'nl-phone2',   'tel')}
+        ${newLeadField('Other Info','nl-otherinfo', 'text')}
         ${newLeadField('Type',      'nl-type',     'text',  false, 'Florist, Event Planner...')}
         ${newLeadField('State',     'nl-state',    'text',  false, 'e.g. Florida')}
         ${newLeadField('Address',   'nl-address',  'text',  false, '123 Main St, Miami FL...')}
@@ -2329,6 +2341,8 @@ async function saveNewLead() {
   const contact   = document.getElementById('nl-contact')?.value.trim();
   const email     = document.getElementById('nl-email')?.value.trim();
   const phone     = document.getElementById('nl-phone')?.value.trim();
+  const phone2    = document.getElementById('nl-phone2')?.value.trim();
+  const otherInfo = document.getElementById('nl-otherinfo')?.value.trim();
   const type      = document.getElementById('nl-type')?.value.trim();
   const state     = document.getElementById('nl-state')?.value.trim();
   const address   = document.getElementById('nl-address')?.value.trim();
@@ -2345,6 +2359,8 @@ async function saveNewLead() {
     contact:     contact   || null,
     email:       email     || null,
     phone:       phone     || null,
+    phone2:      phone2    || null,
+    other_info:  otherInfo || null,
     type:        type      || null,
     state:       state     || null,
     address:     address   || null,
@@ -2373,7 +2389,7 @@ async function saveNewLead() {
     id: newId, c: company, p: 'New Lead',
     r: currentProfile?.name || '', st: state || '',
     ty: type || '', cn: contact || '', em: email || '',
-    ph: phone || '', sl: null, cs: 'novo', tg: [], pr: false,
+    ph: phone || '', ph2: phone2 || '', oi: otherInfo || '', sl: null, cs: 'novo', tg: [], pr: false,
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
     mkt_tag: [],
