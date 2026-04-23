@@ -1201,6 +1201,7 @@ async function updateLeadField(input) {
       key === 'ph'        ? 'phone'     :
       key === 'ty'        ? 'type'      :
       key === 'address'   ? 'address'   :
+      key === 'city'      ? 'city'      :
       key === 'zip'       ? 'zip'       :
       key === 'instagram' ? 'instagram' :
       key === 'website'   ? 'website'   : key
@@ -2378,6 +2379,7 @@ function openNewLeadModal() {
         ${newLeadField('Type',      'nl-type',     'text',  false, 'Florist, Event Planner...')}
         ${newLeadField('State',     'nl-state',    'text',  false, 'e.g. Florida')}
         ${newLeadField('Address',   'nl-address',  'text',  false, '123 Main St, Miami FL...')}
+        ${newLeadField('City',      'nl-city',     'text',  false, 'e.g. Miami')}
         ${newLeadField('Zip Code',  'nl-zip',      'text',  false, 'e.g. 33069')}
         ${newLeadField('Website',   'nl-website',  'text',  false, 'www.example.com')}
         ${newLeadField('Instagram', 'nl-instagram','text',  false, '@handle')}
@@ -2413,6 +2415,7 @@ async function saveNewLead() {
   const type      = document.getElementById('nl-type')?.value.trim();
   const state     = document.getElementById('nl-state')?.value.trim();
   const address   = document.getElementById('nl-address')?.value.trim();
+  const city      = document.getElementById('nl-city')?.value.trim();
   const zip       = document.getElementById('nl-zip')?.value.trim();
   const website   = document.getElementById('nl-website')?.value.trim();
   const instagram = document.getElementById('nl-instagram')?.value.trim();
@@ -2429,6 +2432,7 @@ async function saveNewLead() {
     type:        type      || null,
     state:       state     || null,
     address:     address   || null,
+    city:        city      || null,
     zip:         zip       || null,
     website:     website   || null,
     instagram:   instagram || null,
@@ -2458,7 +2462,7 @@ async function saveNewLead() {
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
     mkt_tag: [],
-    address: address || '', zip: zip || '', website: website || '', instagram: instagram || ''
+    address: address || '', city: city || '', zip: zip || '', website: website || '', instagram: instagram || ''
   };
   leads.push(newLead);
 
@@ -2639,6 +2643,7 @@ function parseBulkCSV(text) {
     type:        idx('type'),
     state:       idx('state'),
     address:     idx('address'),
+    city:        idx('city'),
     zip:         idx('zip'),
     instagram:   idx('instagram'),
     website:     idx('website'),
@@ -2684,6 +2689,8 @@ function parseBulkCSV(text) {
         type:        get(colMap.type),
         state:       get(colMap.state),
         address:     get(colMap.address),
+        city:        get(colMap.city),
+        zip:         get(colMap.zip),
         instagram:   get(colMap.instagram),
         website:     get(colMap.website),
       };
@@ -2725,6 +2732,7 @@ function parseBulkCSV(text) {
     check('ty',          get(colMap.type),      lead.ty,                    'Type');
     check('st',          get(colMap.state),     lead.st,                    'State');
     check('address',     get(colMap.address),   lead.address,               'Address');
+    check('city',        get(colMap.city),      lead.city,                  'City');
     check('zip',         get(colMap.zip),        lead.zip,                   'Zip');
     check('instagram',   get(colMap.instagram), lead.instagram,             'Instagram');
     check('website',     get(colMap.website),   lead.website,               'Website');
@@ -2854,6 +2862,8 @@ async function applyBulkImport() {
         type:        d.type       || null,
         state:       d.state      || null,
         address:     d.address    || null,
+        city:        d.city       || null,
+        zip:         d.zip        || null,
         instagram:   d.instagram  || null,
         website:     d.website    || null,
       });
@@ -2866,7 +2876,8 @@ async function applyBulkImport() {
         cs: r.status || 'novo', tg: r.tags || [], pr: false,
         cc: 0, lc: null, cv: false, cm: '', tl: [],
         responsible: d.responsible || '', mkt_tag: r.mktTags || [],
-        address: d.address || '', instagram: d.instagram || '', website: d.website || ''
+        address: d.address || '', city: d.city || '', zip: d.zip || '',
+        instagram: d.instagram || '', website: d.website || ''
       };
 
       await sb.from('lead_states').insert({
@@ -2906,11 +2917,14 @@ async function applyBulkImport() {
       if (c.ty)          leadsUpdate.type        = c.ty;
       if (c.st)          leadsUpdate.state       = c.st;
       if (c.address)     leadsUpdate.address     = c.address;
+      if (c.city)        leadsUpdate.city        = c.city;
+      if (c.zip)         leadsUpdate.zip         = c.zip;
       if (c.instagram)   leadsUpdate.instagram   = c.instagram;
       if (c.website)     leadsUpdate.website     = c.website;
 
       if (Object.keys(leadsUpdate).length > 0) {
-        await sb.from('leads').update(leadsUpdate).eq('id', lead.id);
+        const { error: upErr } = await sb.from('leads').update(leadsUpdate).eq('id', lead.id);
+        if (upErr) throw upErr;
       }
       Object.assign(lead, c);
       await saveLeadState(lead);
