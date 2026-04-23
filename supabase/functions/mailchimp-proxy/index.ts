@@ -95,21 +95,21 @@ serve(async (req) => {
 
       if (tag && tag.trim()) {
         const tagName = tag.trim()
-        const successEmails = [
-          ...(batchData.new_members || []).map((m: any) => m.email_address),
-          ...(batchData.updated_members || []).map((m: any) => m.email_address),
-        ].filter(Boolean)
-        // Apply tags in background - don't await to avoid timeout
-        Promise.all(successEmails.slice(0, 20).map(async (email: string) => {
-          try {
-            const hash = await md5(email.toLowerCase().trim())
-            await mcFetch(`/lists/${listId}/members/${hash}/tags`, 'POST', {
-              tags: [{ name: tagName, status: 'active' }],
-            })
-          } catch (_) {}
-        })).catch(() => null)
+        const allEmails = members.map((m: any) => m.email_address).filter(Boolean)
+        // Apply tags synchronously in small batches of 10
+        for (let ti = 0; ti < allEmails.length; ti += 10) {
+          const batch = allEmails.slice(ti, ti + 10)
+          await Promise.all(batch.map(async (email: string) => {
+            try {
+              const hash = await md5(email.toLowerCase().trim())
+              await mcFetch(`/lists/${listId}/members/${hash}/tags`, 'POST', {
+                tags: [{ name: tagName, status: 'active' }],
+              })
+            } catch (_) {}
+          }))
+        }
         batchData.tag_applied = tagName
-        batchData.tag_count = successEmails.length
+        batchData.tag_count = allEmails.length
       }
 
       batchData.debug = `listId=${listId} count=${members.length} tag=${tag || 'none'}`
