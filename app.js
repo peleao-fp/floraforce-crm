@@ -242,33 +242,35 @@ async function loadLeads() {
       }
     }
     return {
-    id:          l.id,
-    c:           l.company     || '',
-    p:           l.pipeline    || '',
-    r:           l.responsible || '',
-    st:          l.state       || '',
-    ty:          l.type        || '',
-    cn:          l.contact     || '',
-    em:          l.email       || '',
-    ph:          l.phone       || '',
-    address:     l.address     || '',
-    city,
-    website:     l.website     || '',
-    instagram:   l.instagram   || '',
-    facebook:    l.facebook    || '',
-    zip:         l.zip         || '',
-    sl: l.sales_total ? {
-      total:     parseFloat(l.sales_total)  || 0,
-      count:     parseInt(l.sales_count)    || 0,
-      rep:       l.sales_rep   || '',
-      last_date: l.sales_last  || ''
-    } : null,
-    // state (overwritten by lead_states)
-    cs: 'novo', tg: [], pr: false, cc: 0,
-    lc: null, cv: false, cm: '', tl: [],
-    responsible: l.responsible || '',
-    mkt_tag: []
-  };
+      id:          l.id,
+      c:           l.company     || '',
+      p:           l.pipeline    || '',
+      r:           l.responsible || '',
+      st:          l.state       || '',
+      ty:          l.type        || '',
+      cn:          l.contact     || '',
+      em:          l.email       || '',
+      ph:          l.phone       || '',
+      ph2:         l.phone2      || '',
+      oi:          l.other_info  || '',
+      address:     l.address     || '',
+      city,
+      website:     l.website     || '',
+      instagram:   l.instagram   || '',
+      facebook:    l.facebook    || '',
+      zip:         l.zip         || '',
+      sl: l.sales_total ? {
+        total:     parseFloat(l.sales_total)  || 0,
+        count:     parseInt(l.sales_count)    || 0,
+        rep:       l.sales_rep   || '',
+        last_date: l.sales_last  || ''
+      } : null,
+      // state (overwritten by lead_states)
+      cs: 'novo', tg: [], pr: false, cc: 0,
+      lc: null, cv: false, cm: '', tl: [],
+      responsible: l.responsible || '',
+      mkt_tag: []
+    };
   });
   if (cityBackfillQueue.length) backfillCities(cityBackfillQueue);
 }
@@ -691,42 +693,14 @@ function toggleSpecial(el, val) {
   currentPage = 1;
   applyFilters();
 }
-function toggleHighlights(el) {
-  toggleSpecial(el, 'highlights');
-}
-function collectZipConditions() {
-  const rows = document.querySelectorAll('#zip-conditions .zip-cond-row');
-  const out = [];
-  rows.forEach(r => {
-    const value = (r.querySelector('.zip-cond-value')?.value || '').trim();
-    if (!value) return;
-    out.push({ mode: r.querySelector('.zip-cond-mode')?.value || 'starts', value });
-  });
-  return out;
-}
-function addZipCondition() {
-  const wrap = document.getElementById('zip-conditions');
-  if (!wrap) return;
-  const row = document.createElement('div');
-  row.className = 'zip-cond-row';
-  row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px';
-  row.innerHTML = '<select class="filter-input filter-select zip-cond-mode" onchange="applyFilters()" style="width:90px;flex-shrink:0">'
-    + '<option value="starts">Starts</option><option value="ends">Ends</option><option value="contains">Contains</option>'
-    + '</select>'
-    + '<input type="text" class="filter-input zip-cond-value" placeholder="..." oninput="applyFilters()" style="flex:1;min-width:0" maxlength="10">'
-    + '<button class="btn btn-ghost" onclick="this.parentElement.remove();applyFilters()" style="padding:0 8px;font-size:16px;line-height:1;height:28px" title="Remove">×</button>';
-  wrap.appendChild(row);
-}
-
 function applyFilters() {
   const search   = document.getElementById('search-input')?.value.toLowerCase() || '';
   const pipeline = document.getElementById('filter-segmentation')?.value || '';
   const type     = document.getElementById('filter-type')?.value || '';
   const state    = document.getElementById('filter-state')?.value || '';
   const owner    = document.getElementById('filter-owner')?.value || '';
-  const cityVal  = (document.getElementById('filter-city')?.value || '').trim().toLowerCase();
-  const zipLogic = document.getElementById('filter-zip-logic')?.value || 'and';
-  const zipConds = collectZipConditions();
+  const zipVal   = (document.getElementById('filter-zip')?.value || '').trim();
+  const zipMode  = document.getElementById('filter-zip-mode')?.value || 'starts';
   const pool     = getMyLeads();
   filteredLeads  = pool.filter(l => {
     if (activeStatus !== 'all' && l.cs !== activeStatus) return false;
@@ -734,26 +708,16 @@ function applyFilters() {
     if (type     && !(l.ty || '').includes(type))         return false;
     if (state    && l.st !== state)                        return false;
     if (owner    && (l.responsible || l.r) !== owner)     return false;
-    if (cityVal) {
-      const cityField = (l.city || '').toLowerCase();
-      const ad = (l.address || '').toLowerCase();
-      if (!cityField.includes(cityVal) && !ad.includes(cityVal)) return false;
-    }
-    if (zipConds.length) {
+    if (zipVal) {
       const lz = (l.zip || '').trim();
-      const tests = zipConds.map(c => {
-        if (c.mode === 'starts')   return lz.startsWith(c.value);
-        if (c.mode === 'ends')     return lz.endsWith(c.value);
-        if (c.mode === 'contains') return lz.includes(c.value);
-        return true;
-      });
-      if (zipLogic === 'or' ? !tests.some(Boolean) : !tests.every(Boolean)) return false;
+      if (zipMode === 'starts'   && !lz.startsWith(zipVal)) return false;
+      if (zipMode === 'ends'     && !lz.endsWith(zipVal))   return false;
+      if (zipMode === 'contains' && !lz.includes(zipVal))   return false;
     }
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
     if (activeSpecials.has('no_contact') && l.lc)          return false;
-    if (activeSpecials.has('highlights') && !l.mc_engaged) return false;
     if (search) {
       const h = (l.c + ' ' + l.cn + ' ' + l.em).toLowerCase();
       if (!h.includes(search)) return false;
@@ -771,7 +735,6 @@ function applyFilters() {
   renderPagination();
   updateMiniStats();
   updateTopbarStats();
-  updateNotificationBell();
 }
 function handleLeadRowClick(event, id) {
   // Don't open modal if clicking checkbox area
@@ -938,7 +901,7 @@ function renderTable() {
   document.getElementById('lc-total').textContent = getMyLeads().length.toLocaleString();
   const tbody = document.getElementById('leads-tbody');
   if (!filteredLeads.length) {
-    tbody.innerHTML = '<tr><td colspan="13"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
     return;
   }
   tbody.innerHTML = page.map(l => {
@@ -947,6 +910,7 @@ function renderTable() {
     const st      = l.st ? (l.st.split(' - ')[1] || l.st) : '—';
     const callBtn = l.ph
       ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
+        + (l.ph2 ? '<a href="tel:' + l.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none;margin-left:2px" title="' + esc(l.ph2) + '">📞2</a>' : '')
       : '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;opacity:.3" disabled>📞</button>';
     const isEngaged = l.mc_engaged && !l.mc_acknowledged;
     const mcBadge = isEngaged ? '<span class="mc-badge">📧 MC</span> ' : '';
@@ -954,10 +918,7 @@ function renderTable() {
       + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
       + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
-      + '<td style="font-size:11px;color:var(--text2)">' + esc(l.responsible || l.r || '—') + '</td>'
-      + '<td style="font-size:11px">' + (l.city ? esc(l.city) : '—') + '</td>'
       + '<td style="font-size:11px">' + st + '</td>'
-      + '<td style="font-size:11px;color:var(--text3)">' + (l.zip ? esc(l.zip) : '—') + '</td>'
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
       + '<td>' + tags + '</td>'
@@ -1032,7 +993,10 @@ async function openModal(id) {
       : '<span style="color:' + (days > 7 ? 'var(--danger)' : 'var(--warn)') + '">Last contact: <strong>' + days + ' day' + (days > 1 ? 's' : '') + ' ago</strong></span>';
 
   const phoneHtml = lead.ph
-    ? '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 Call: ' + esc(lead.ph) + '</a>'
+    ? '<div style="display:flex;flex-wrap:wrap;gap:8px">'
+      + '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph) + '</a>'
+      + (lead.ph2 ? '<a href="tel:' + lead.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph2) + '</a>' : '')
+      + '</div>'
     : '<span style="color:var(--text3);font-size:12px">No phone number</span>';
 
   const statusBtns = ['novo','contatado','proposta','cliente'].map(s => {
@@ -1201,6 +1165,8 @@ async function renderEditableFields(lead) {
     + field('Contact',        'cn',          lead.cn)
     + field('Email',          'em',          lead.em, 'email')
     + field('Phone',          'ph',          lead.ph, 'tel')
+    + field('Phone 2',        'ph2',         lead.ph2, 'tel')
+    + field('Other Info',     'oi',          lead.oi)
     + field('Address',        'address',     lead.address)
     + field('City',           'city',        lead.city)
     + field('Zip Code',       'zip',         lead.zip)
@@ -1262,6 +1228,8 @@ async function updateLeadField(input) {
         key === 'cn'        ? 'contact'   :
         key === 'em'        ? 'email'     :
         key === 'ph'        ? 'phone'     :
+        key === 'ph2'       ? 'phone2'    :
+        key === 'oi'        ? 'other_info':
         key === 'ty'        ? 'type'      :
         key === 'address'   ? 'address'   :
         key === 'city'      ? 'city'      :
@@ -1520,7 +1488,6 @@ function renderKanban() {
     + vl.map(l =>
       '<div class="kanban-card" draggable="true" ondragstart="onDragStart(event,' + l.id + ')">'
       + '<div class="kanban-card-name">' + esc(l.c) + '</div>'
-      + (l.city ? '<div class="kanban-card-city" style="font-size:11px;color:var(--text3);margin-top:2px">📍 ' + esc(l.city) + '</div>' : '')
       + '<div class="kanban-card-state">' + (stateEmoji[l.cs]||'⚪') + ' ' + l.cs + '</div></div>'
     ).join('')
     + '</div></div>'
@@ -2443,10 +2410,11 @@ function openNewLeadModal() {
         ${newLeadField('Contact',   'nl-contact',  'text')}
         ${newLeadField('Email',     'nl-email',    'email')}
         ${newLeadField('Phone',     'nl-phone',    'tel')}
+        ${newLeadField('Phone 2',   'nl-phone2',   'tel')}
+        ${newLeadField('Other Info','nl-otherinfo', 'text')}
         ${newLeadField('Type',      'nl-type',     'text',  false, 'Florist, Event Planner...')}
         ${newLeadField('State',     'nl-state',    'text',  false, 'e.g. Florida')}
         ${newLeadField('Address',   'nl-address',  'text',  false, '123 Main St, Miami FL...')}
-        ${newLeadField('City',      'nl-city',     'text',  false, 'e.g. Miami')}
         ${newLeadField('Zip Code',  'nl-zip',      'text',  false, 'e.g. 33069')}
         ${newLeadField('Website',   'nl-website',  'text',  false, 'www.example.com')}
         ${newLeadField('Instagram', 'nl-instagram','text',  false, '@handle')}
@@ -2480,10 +2448,11 @@ async function saveNewLead() {
   const contact   = document.getElementById('nl-contact')?.value.trim();
   const email     = document.getElementById('nl-email')?.value.trim();
   const phone     = document.getElementById('nl-phone')?.value.trim();
+  const phone2    = document.getElementById('nl-phone2')?.value.trim();
+  const otherInfo = document.getElementById('nl-otherinfo')?.value.trim();
   const type      = document.getElementById('nl-type')?.value.trim();
   const state     = document.getElementById('nl-state')?.value.trim();
   const address   = document.getElementById('nl-address')?.value.trim();
-  const city      = document.getElementById('nl-city')?.value.trim();
   const zip       = document.getElementById('nl-zip')?.value.trim();
   const website   = document.getElementById('nl-website')?.value.trim();
   const instagram = document.getElementById('nl-instagram')?.value.trim();
@@ -2498,6 +2467,8 @@ async function saveNewLead() {
     contact:     contact   || null,
     email:       email     || null,
     phone:       phone     || null,
+    phone2:      phone2    || null,
+    other_info:  otherInfo || null,
     type:        type      || null,
     state:       state     || null,
     address:     address   || null,
@@ -2529,7 +2500,7 @@ async function saveNewLead() {
     id: newId, c: company, p: 'New Lead',
     r: currentProfile?.name || '', st: state || '',
     ty: type || '', cn: contact || '', em: email || '',
-    ph: phone || '', sl: null, cs: 'novo', tg: [], pr: false,
+    ph: phone || '', ph2: phone2 || '', oi: otherInfo || '', sl: null, cs: 'novo', tg: [], pr: false,
     cc: 0, lc: null, cv: false, cm: notes || '', tl: [],
     responsible: currentProfile?.name || '',
     mkt_tag: [],
@@ -3287,25 +3258,6 @@ function closeQuoteModal() {
   window.editingQuoteId = null;
 }
 
-function splitQuoteItems(q) {
-  const all = Array.isArray(q?.items) ? q.items : [];
-  const realItems = [];
-  const embeddedExtras = [];
-  let meta = {};
-  for (const it of all) {
-    if (it && it._kind === 'extra') {
-      embeddedExtras.push({ name: it.name, amount: Number(it.amount) || 0, enabled: it.enabled !== false });
-    } else if (it && it._kind === 'meta') {
-      meta = { ...meta, ...it };
-      delete meta._kind;
-    } else {
-      realItems.push(it);
-    }
-  }
-  const extras = embeddedExtras.length ? embeddedExtras : (Array.isArray(q?.extra_charges) ? q.extra_charges : []);
-  return { items: realItems, extras, meta };
-}
-
 async function openEditQuoteModal(quoteId, leadId) {
   const { data: q, error } = await sb.from('quotes').select('*').eq('id', quoteId).single();
   if (error || !q) { showToast('❌ Could not load quote'); return; }
@@ -3313,10 +3265,9 @@ async function openEditQuoteModal(quoteId, leadId) {
   if (!lead) { showToast('❌ Lead not found'); return; }
 
   window.editingQuoteId = quoteId;
-  const split = splitQuoteItems(q);
-  currentQuote = { lead_id: q.lead_id, status: q.status, items: split.items, discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '', po: split.meta.po || '' };
-  quoteItems = split.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) }));
-  quoteExtraCharges = split.extras.length ? split.extras : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
+  currentQuote = { lead_id: q.lead_id, status: q.status, items: q.items || [], discount: q.discount || 0, total: q.total || 0, notes: q.notes || '', valid_until: q.valid_until || '' };
+  quoteItems = q.items ? q.items.map(i => ({ ...i, subtotal: (i.qty||0)*(i.price||0) })) : [];
+  quoteExtraCharges = q.extra_charges ? q.extra_charges : DEFAULT_EXTRA_CHARGES.map(c => ({ ...c }));
 
   renderQuoteModal(lead);
 
@@ -3329,8 +3280,6 @@ async function openEditQuoteModal(quoteId, leadId) {
   if (validEl)  validEl.value  = q.valid_until ? q.valid_until.split('T')[0] : '';
   if (discEl)   discEl.value   = q.discount || 0;
   if (notesEl)  notesEl.value  = q.notes || '';
-  const poEl = document.getElementById('q-po');
-  if (poEl)     poEl.value     = currentQuote.po || '';
 
   updateQuoteTotals();
   document.getElementById('quote-modal').style.display = 'flex';
@@ -3357,15 +3306,12 @@ async function loadLeadQuotes(leadId) {
     const date = new Date(q.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
     const color = statusColors[q.status] || 'var(--text3)';
     const emoji = statusEmoji[q.status] || '📄';
-    const qMeta = splitQuoteItems(q).meta;
-    const poTxt = qMeta.po ? ' · PO: ' + esc(qMeta.po) : '';
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">'
       + '<div style="flex:1">'
-      + '<div style="font-size:12px;font-weight:600;color:var(--text)">' + emoji + ' $' + parseFloat(q.total || 0).toFixed(2)
+      + '<div style="font-size:12px;font-weight:600;color:var(--text)">' + emoji + ' ' + (q.quote_number ? 'Q-' + new Date(q.created_at).getFullYear() + '-' + String(q.quote_number).padStart(4,'0') : '#' + q.id?.substring(0,6).toUpperCase()) + ' · $' + parseFloat(q.total || 0).toFixed(2)
       + ' <span style="font-size:10px;color:' + color + ';font-weight:500;text-transform:uppercase">' + q.status + '</span></div>'
       + '<div style="font-size:10px;color:var(--text3);margin-top:2px">' + date + ' · ' + esc(q.created_by_name || '—')
       + (q.valid_until ? ' · Valid until: ' + new Date(q.valid_until).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '')
-      + poTxt
       + '</div>'
       + '</div>'
       + '<div style="display:flex;gap:6px">'
@@ -3439,10 +3385,6 @@ function renderQuoteModal(lead) {
               <option value="declined">Declined</option>
             </select>
           </div>
-        </div>
-        <div class="info-item">
-          <div class="info-item-lbl">PO #</div>
-          <div class="info-item-val"><input type="text" class="edit-field" id="q-po" placeholder="PO number..."></div>
         </div>
       </div>
     </div>
@@ -3569,7 +3511,7 @@ function renderQuoteExtraCharges() {
         + '<label for="ec-chk-' + i + '" style="font-size:12px;min-width:130px;cursor:pointer;color:var(--text2)">' + esc(c.name) + '</label>'
         + '<span style="font-size:12px;color:var(--text3)">$</span>'
         + '<input type="number" class="edit-field" value="' + (c.amount || 0) + '" min="0" step="0.01" style="width:90px" oninput="updateExtraCharge(' + i + ',this.value)" ' + (!c.enabled ? 'disabled' : '') + '>'
-        + '<span id="ec-sum-' + i + '" style="font-size:11px;color:var(--accent);font-weight:600;' + (c.enabled ? '' : 'display:none') + '">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>'
+        + (c.enabled ? '<span style="font-size:11px;color:var(--accent);font-weight:600">+$' + parseFloat(c.amount||0).toFixed(2) + '</span>' : '')
         + '</div>'
       ).join('')
     + '</div>';
@@ -3581,8 +3523,7 @@ function toggleExtraCharge(i, enabled) {
 }
 function updateExtraCharge(i, val) {
   quoteExtraCharges[i].amount = parseFloat(val) || 0;
-  const sumEl = document.getElementById('ec-sum-' + i);
-  if (sumEl) sumEl.textContent = '+$' + quoteExtraCharges[i].amount.toFixed(2);
+  renderQuoteExtraCharges();
   updateQuoteTotals();
 }
 function updateQuoteTotals() {
@@ -3600,12 +3541,6 @@ async function saveQuote() {
   const { subtotal, discount, total } = updateQuoteTotals();
   const lead = leads.find(l => l.id === currentQuote.lead_id);
 
-  const embeddedExtras = quoteExtraCharges
-    .filter(c => c.enabled)
-    .map(c => ({ _kind: 'extra', name: c.name, amount: Number(c.amount) || 0, enabled: true }));
-  const poVal = (document.getElementById('q-po')?.value || '').trim();
-  const metaEntry = poVal ? [{ _kind: 'meta', po: poVal }] : [];
-
   const quoteData = {
     lead_id:        currentQuote.lead_id,
     created_by:     currentUser.id,
@@ -3614,7 +3549,8 @@ async function saveQuote() {
     valid_until:    document.getElementById('q-valid').value || null,
     notes:          document.getElementById('q-notes').value,
     discount,
-    items:          [...quoteItems, ...embeddedExtras, ...metaEntry],
+    items:          quoteItems,
+    extra_charges:  quoteExtraCharges.filter(c => c.enabled),
     total
   };
 
@@ -3653,12 +3589,16 @@ async function saveAndDownloadQuote() {
   generateQuotePDF(quote, lead);
 }
 
+function formatQuoteNumber(quote) {
+  if (quote.quote_number) {
+    const year = new Date(quote.created_at || Date.now()).getFullYear();
+    return 'Q-' + year + '-' + String(quote.quote_number).padStart(4, '0');
+  }
+  return 'Q-' + quote.id?.substring(0, 8).toUpperCase();
+}
+
 function generateQuotePDF(quote, lead) {
-  const pdfSplit = splitQuoteItems(quote);
-  const pdfItems = pdfSplit.items.map(i => ({ ...i, subtotal: (i.subtotal != null ? i.subtotal : (i.qty || 0) * (i.price || 0)) }));
-  const pdfExtras = pdfSplit.extras;
-  const pdfPo = pdfSplit.meta.po || '';
-  const subtotal = pdfItems.reduce((s, i) => s + (i.subtotal || 0), 0);
+  const subtotal = quote.items.reduce((s, i) => s + (i.subtotal || 0), 0);
   const discount = quote.discount || 0;
   const total = quote.total || 0;
 
@@ -3735,7 +3675,7 @@ function generateQuotePDF(quote, lead) {
       <img src="https://fullpot.com/wp-content/uploads/logo.png" alt="Full Pot of Flowers">
     </div>
     <div class="header-company">
-      <div class="doc-title">QUOTE #${quote.id?.substring(0,8).toUpperCase()}&nbsp;&nbsp;&nbsp;P.O.: ${pdfPo ? esc(pdfPo) : '_________'}</div>
+      <div class="doc-title">QUOTE #${formatQuoteNumber(quote)}&nbsp;&nbsp;&nbsp;P.O.: _________</div>
       <div class="co-name">FULL POT OF FLOWERS</div>
       <div class="co-addr">1516 SW 13 CT</div>
       <div class="co-addr">POMPANO BEACH, FL 33069</div>
@@ -3774,8 +3714,7 @@ function generateQuotePDF(quote, lead) {
   <div class="vendor-row">
     <div><span>Sales Rep: </span><strong>${esc(quote.created_by_name || '—')}</strong></div>
     <div><span>Date: </span><strong>${quoteDateStr}</strong></div>
-    <div><span>Quote #: </span><strong>${quote.id?.substring(0,8).toUpperCase()}</strong></div>
-    ${pdfPo ? '<div><span>PO #: </span><strong>' + esc(pdfPo) + '</strong></div>' : ''}
+    <div><span>Quote #: </span><strong>${formatQuoteNumber(quote)}</strong></div>
   </div>
 
   <!-- ITEMS TABLE -->
@@ -3790,7 +3729,7 @@ function generateQuotePDF(quote, lead) {
       </tr>
     </thead>
     <tbody>
-      ${pdfItems.map(item => `
+      ${(quote.items || []).map(item => `
         <tr>
           <td>${esc(item.name || '—')}</td>
           <td style="text-align:right">${item.qty}</td>
@@ -3806,7 +3745,7 @@ function generateQuotePDF(quote, lead) {
   <div class="totals">
     <div class="total-row"><span class="total-label">Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
     ${discount > 0 ? '<div class="total-row"><span class="total-label">Discount (' + discount + '%)</span><span>-$' + (subtotal * discount / 100).toFixed(2) + '</span></div>' : ''}
-    ${pdfExtras.filter(c => c.enabled !== false && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
+    ${(quote.extra_charges || []).filter(c => c.enabled && c.amount > 0).map(c => '<div class="total-row"><span class="total-label">' + c.name + '</span><span>+$' + parseFloat(c.amount).toFixed(2) + '</span></div>').join('')}
     <div class="total-row final"><span class="total-label">TOTAL</span><span>$${total.toFixed(2)}</span></div>
   </div>
 
@@ -3910,71 +3849,6 @@ async function syncMailchimpEngagement() {
   }
 }
 
-function getHighlightedLeads() {
-  return getMyLeads().filter(l => l.mc_engaged && !l.mc_acknowledged);
-}
-function updateNotificationBell() {
-  const badge = document.getElementById('notif-badge');
-  if (!badge) return;
-  const count = getHighlightedLeads().length;
-  if (count > 0) {
-    badge.textContent = count > 99 ? '99+' : String(count);
-    badge.style.display = '';
-  } else {
-    badge.style.display = 'none';
-  }
-  const dd = document.getElementById('notif-dropdown');
-  if (dd && dd.style.display !== 'none') renderNotificationDropdown();
-}
-function renderNotificationDropdown() {
-  const dd = document.getElementById('notif-dropdown');
-  if (!dd) return;
-  const list = getHighlightedLeads();
-  if (!list.length) {
-    dd.innerHTML = '<div class="notif-empty">No new campaign engagements.<br>You\'re all caught up ✨</div>';
-    return;
-  }
-  dd.innerHTML = '<div class="notif-header">✨ Highlights — ' + list.length + ' lead' + (list.length > 1 ? 's' : '') + '</div>'
-    + list.map(l => {
-      const eng = l.mc_engaged || {};
-      const opens = eng.opens || 0;
-      const clicks = eng.clicks || 0;
-      const camp = (eng.campaigns && eng.campaigns[0]) ? esc(eng.campaigns[0]) : '';
-      return '<div class="notif-item" onclick="openHighlightLead(' + l.id + ')">'
-        + '<div style="font-size:13px;font-weight:600;color:var(--text)">' + esc(l.c || '—') + '</div>'
-        + '<div style="font-size:11px;color:var(--text2)">' + (l.cn ? esc(l.cn) + ' · ' : '') + opens + ' opens · ' + clicks + ' clicks</div>'
-        + (camp ? '<div style="font-size:10px;color:var(--text3);margin-top:2px">📧 ' + camp + '</div>' : '')
-        + '</div>';
-    }).join('');
-}
-function toggleNotifications(evt) {
-  if (evt) evt.stopPropagation();
-  const dd = document.getElementById('notif-dropdown');
-  if (!dd) return;
-  if (dd.style.display === 'none') {
-    renderNotificationDropdown();
-    dd.style.display = 'block';
-    setTimeout(() => document.addEventListener('click', closeNotifOnOutsideClick), 0);
-  } else {
-    dd.style.display = 'none';
-    document.removeEventListener('click', closeNotifOnOutsideClick);
-  }
-}
-function closeNotifOnOutsideClick(e) {
-  const wrap = document.querySelector('.notif-wrap');
-  if (wrap && !wrap.contains(e.target)) {
-    const dd = document.getElementById('notif-dropdown');
-    if (dd) dd.style.display = 'none';
-    document.removeEventListener('click', closeNotifOnOutsideClick);
-  }
-}
-function openHighlightLead(id) {
-  const dd = document.getElementById('notif-dropdown');
-  if (dd) dd.style.display = 'none';
-  document.removeEventListener('click', closeNotifOnOutsideClick);
-  openModal(id);
-}
-
 async function acknowledgeMcEngagement(leadId) {
   const lead = leads.find(l => l.id === leadId);
   if (!lead) return;
@@ -4004,7 +3878,6 @@ async function acknowledgeMcEngagement(leadId) {
   logActivity(lead.id, lead.c, 'mc_engagement', 'Acknowledged email engagement');
   showToast('✅ Acknowledged — status updated');
   applyFilters();
-  updateNotificationBell();
 }
 
 // ── START ─────────────────────────────────────────────────────
