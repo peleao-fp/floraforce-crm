@@ -2457,6 +2457,7 @@ async function saveNewLead() {
   const website   = document.getElementById('nl-website')?.value.trim();
   const instagram = document.getElementById('nl-instagram')?.value.trim();
   const facebook  = document.getElementById('nl-facebook')?.value.trim();
+  const city      = address ? (extractCityFromAddress(address) || '') : '';
 
   const maxId = leads.length ? Math.max(...leads.map(l => l.id || 0)) : 0;
   const newId = maxId + 1;
