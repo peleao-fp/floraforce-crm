@@ -100,6 +100,9 @@ async function loadApp(user) {
   // Load segmentations
   await loadSegmentations();
 
+  // Cold-lead notifications (admins/mkt only)
+  refreshColdLeadNotifications({ announceNew: true });
+
   setLoader('Ready!', 100);
   setTimeout(() => {
     hideLoader();
@@ -2043,6 +2046,31 @@ function renderMcSettings(settings, allLists) {
     + (settings.main_list_id ? '<span style="font-size:11px;color:var(--accent)">✅ Active</span>' : '<span style="font-size:11px;color:var(--warn)">⚠️ Not set</span>')
     + '</div></div>';
 
+  // Cold Lead import
+  const coldListId = settings.cold_list_id || '';
+  const coldTag    = settings.cold_tag_name || 'cold lead';
+  html += '<div style="border-top:1px solid var(--border2);padding-top:14px">'
+    + '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;font-weight:600">📥 Cold Leads — auto-import from website signups</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-bottom:10px">New subscribers tagged as "' + esc(coldTag) + '" inside the chosen audience are imported as <strong style="color:var(--text2)">COLD LEAD</strong> assigned to <strong style="color:var(--text2)">Rafael Chaves</strong>.</div>'
+    + '<div style="display:flex;flex-direction:column;gap:8px">'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+        + '<div style="min-width:130px;font-size:12px;color:var(--text2)">Audience</div>'
+        + '<select class="form-select" style="flex:1" id="mc-cold-list-sel" onchange="setMcColdList(this.value)">'
+        + listOptions(coldListId)
+        + '</select>'
+        + (coldListId ? '<span style="font-size:11px;color:var(--accent)">✅</span>' : '<span style="font-size:11px;color:var(--warn)">⚠️</span>')
+      + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+        + '<div style="min-width:130px;font-size:12px;color:var(--text2)">Tag name</div>'
+        + '<input class="form-input" id="mc-cold-tag-input" value="' + esc(coldTag) + '" style="flex:1" onblur="setMcColdTag(this.value)" onkeydown="if(event.key===\'Enter\')this.blur()">'
+      + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;margin-top:4px">'
+        + '<button class="btn btn-primary" onclick="importColdLeadsNow()" id="cold-import-btn" style="font-size:12px;padding:7px 14px">📥 Import Now</button>'
+        + '<span id="cold-import-status" style="font-size:11px;color:var(--text3)"></span>'
+      + '</div>'
+    + '</div>'
+  + '</div>';
+
   // Tag lists
   html += '<div>'
     + '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px;font-weight:600">Tag Lists — one per MKT Tag</div>'
@@ -2073,6 +2101,51 @@ async function setMcTagList(tag, listId) {
   await mcCall('set_tag_list', { tag, listId });
   showToast(listId ? '✅ List set for "' + tag + '"' : '🗑 List removed for "' + tag + '"');
   await loadMcSettings();
+}
+
+async function setMcColdList(listId) {
+  await mcCall('set_cold_config', { listId });
+  showToast(listId ? '✅ Cold-lead audience set' : '🗑 Cold-lead audience removed');
+  await loadMcSettings();
+}
+
+async function setMcColdTag(tagName) {
+  const v = (tagName || '').trim();
+  if (!v) return;
+  await mcCall('set_cold_config', { tagName: v });
+  showToast('✅ Cold tag set to "' + v + '"');
+}
+
+async function importColdLeadsNow() {
+  const status = document.getElementById('cold-import-status');
+  const btn    = document.getElementById('cold-import-btn');
+  if (status) status.textContent = 'Importing...';
+  if (btn) btn.disabled = true;
+  try {
+    const res = await mcCall('import_cold_leads');
+    if (res.error) {
+      if (status) status.textContent = '❌ ' + res.error;
+      showToast('❌ ' + res.error);
+      return;
+    }
+    const n = res.imported?.length || 0;
+    const s = res.skipped || 0;
+    if (status) status.textContent = '✅ ' + n + ' imported · ' + s + ' already existed (' + (res.total || 0) + ' total)';
+    showToast(n ? '📥 ' + n + ' new cold leads imported' : 'ℹ️ No new cold leads (' + s + ' already in CRM)');
+    if (n) {
+      await loadLeads();
+      await loadLeadStates();
+      await loadSegmentations();
+      applyFilters();
+      if (typeof refreshMktPreview === 'function') refreshMktPreview();
+      refreshColdLeadNotifications();
+    }
+  } catch(e) {
+    if (status) status.textContent = '❌ ' + e.message;
+    showToast('❌ Import failed: ' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 async function loadMcAudiences() {
   const sel = document.getElementById('mkt-audience-select');
@@ -2395,6 +2468,135 @@ function showToast(msg) {
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+// ── COLD-LEAD NOTIFICATIONS ───────────────────────────────────
+function isColdLead(l) {
+  if (!l) return false;
+  if ((l.p || '') === 'COLD LEAD') return true;
+  const t = l.mkt_tag;
+  if (Array.isArray(t)) return t.some(x => String(x).toLowerCase() === 'cold');
+  if (typeof t === 'string') return t.toLowerCase().includes('cold');
+  return false;
+}
+
+function getColdLeads() {
+  return (leads || []).filter(isColdLead);
+}
+
+function getSeenColdIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('cold_seen_ids') || '[]')); }
+  catch(e) { return new Set(); }
+}
+
+function saveSeenColdIds(set) {
+  try { localStorage.setItem('cold_seen_ids', JSON.stringify([...set])); } catch(e) {}
+}
+
+function refreshColdLeadNotifications(opts) {
+  const badge = document.getElementById('notif-badge');
+  const btn   = document.getElementById('btn-notifications');
+  const dd    = document.getElementById('notif-dropdown');
+  if (!badge || !btn || !dd) return;
+
+  const role = currentProfile?.role || '';
+  if (role !== 'admin' && role !== 'mkt') {
+    badge.style.display = 'none';
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+
+  const cold   = getColdLeads();
+  const seen   = getSeenColdIds();
+  const unseen = cold.filter(l => !seen.has(l.id));
+
+  if (unseen.length) {
+    badge.textContent = unseen.length > 99 ? '99+' : String(unseen.length);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  const sorted    = [...cold].sort((a,b) => (b.id||0) - (a.id||0));
+  const newOnes   = sorted.filter(l => !seen.has(l.id));
+  const recentOld = sorted.filter(l => seen.has(l.id)).slice(0, 8);
+
+  let html = '';
+  if (!cold.length) {
+    html = '<div class="notif-empty">No cold leads yet.<br><span style="font-size:10px">They appear here when imported from Mailchimp.</span></div>';
+  } else {
+    if (newOnes.length) {
+      html += '<div class="notif-header">📥 New Cold Leads (' + newOnes.length + ')</div>';
+      html += newOnes.map(l => coldNotifItem(l, true)).join('');
+      html += '<div style="text-align:center;padding:8px;border-top:1px solid var(--border2);margin-top:4px">'
+        + '<button class="btn btn-ghost" onclick="markAllColdSeen()" style="font-size:11px;padding:4px 10px">Mark all read</button>'
+        + '</div>';
+    }
+    if (recentOld.length) {
+      html += '<div class="notif-header">Recent</div>';
+      html += recentOld.map(l => coldNotifItem(l, false)).join('');
+    }
+    if (!newOnes.length && !recentOld.length) {
+      html = '<div class="notif-empty">No new cold leads.</div>';
+    }
+  }
+  dd.innerHTML = html;
+
+  if (opts?.announceNew && unseen.length) {
+    showToast('📥 ' + unseen.length + ' new cold lead' + (unseen.length === 1 ? '' : 's') + ' from Mailchimp');
+  }
+}
+
+function coldNotifItem(l, isNew) {
+  const title = esc(l.c || l.cn || l.em || ('Lead #' + l.id));
+  const sub   = esc([l.cn && l.c ? l.cn : '', l.em || ''].filter(Boolean).join(' · '));
+  const dot   = isNew ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:middle"></span>' : '';
+  return '<div class="notif-item" onclick="openColdLead(' + l.id + ')">'
+    + '<div style="font-weight:' + (isNew ? '600' : '500') + ';font-size:13px' + (isNew ? ';color:var(--accent)' : '') + '">' + dot + title + '</div>'
+    + (sub ? '<div style="font-size:11px;color:var(--text3)">' + sub + '</div>' : '')
+    + '</div>';
+}
+
+function toggleNotifications(event) {
+  if (event) event.stopPropagation();
+  const dd = document.getElementById('notif-dropdown');
+  if (!dd) return;
+  const willOpen = dd.style.display === 'none' || !dd.style.display;
+  dd.style.display = willOpen ? 'block' : 'none';
+  if (willOpen) {
+    refreshColdLeadNotifications();
+    setTimeout(() => document.addEventListener('click', closeNotifOnOutside, { once: true }), 0);
+  }
+}
+
+function closeNotifOnOutside(e) {
+  const dd  = document.getElementById('notif-dropdown');
+  const btn = document.getElementById('btn-notifications');
+  if (!dd) return;
+  if (dd.contains(e.target) || (btn && btn.contains(e.target))) {
+    setTimeout(() => document.addEventListener('click', closeNotifOnOutside, { once: true }), 0);
+    return;
+  }
+  dd.style.display = 'none';
+}
+
+function openColdLead(id) {
+  const seen = getSeenColdIds();
+  seen.add(id);
+  saveSeenColdIds(seen);
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) dd.style.display = 'none';
+  refreshColdLeadNotifications();
+  if (typeof openModal === 'function') openModal(id);
+}
+
+function markAllColdSeen() {
+  const seen = getSeenColdIds();
+  getColdLeads().forEach(l => seen.add(l.id));
+  saveSeenColdIds(seen);
+  refreshColdLeadNotifications();
+  showToast('✅ Marked as read');
 }
 
 // ── NEW LEAD ──────────────────────────────────────────────────

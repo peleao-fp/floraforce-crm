@@ -10,12 +10,18 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders })
+    const cronSecret = Deno.env.get('CRON_SECRET')
+    const cronHeader = req.headers.get('x-cron-key')
+    const isCron = !!(cronSecret && cronHeader && cronHeader === cronSecret)
 
-    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!)
-    const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''))
-    if (authError || !user) return new Response(JSON.stringify({ error: 'Unauthorized', detail: authError?.message }), { status: 401, headers: corsHeaders })
+    if (!isCron) {
+      const authHeader = req.headers.get('Authorization')
+      if (!authHeader) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders })
+
+      const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!)
+      const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''))
+      if (authError || !user) return new Response(JSON.stringify({ error: 'Unauthorized', detail: authError?.message }), { status: 401, headers: corsHeaders })
+    }
 
     const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
     const { data: setting } = await sbAdmin.from('app_settings').select('value').eq('key', 'mailchimp_api_key').single()
@@ -149,6 +155,128 @@ serve(async (req) => {
       const { campaignId } = body
       const data = await mcFetch(`/reports/${campaignId}`)
       return new Response(JSON.stringify(data), { headers: corsHeaders })
+    }
+
+    // ── SET COLD CONFIG ───────────────────────────────────────
+    if (action === 'set_cold_config') {
+      const { listId, tagName } = body
+      const { data: cur } = await sbAdmin.from('app_settings').select('value').eq('key', 'mc_settings').single()
+      const settings = cur?.value ? JSON.parse(cur.value) : { tag_lists: {} }
+      if (listId !== undefined) settings.cold_list_id = listId
+      if (tagName !== undefined) settings.cold_tag_name = tagName
+      await sbAdmin.from('app_settings').upsert({ key: 'mc_settings', value: JSON.stringify(settings) }, { onConflict: 'key' })
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders })
+    }
+
+    // ── IMPORT COLD LEADS ─────────────────────────────────────
+    if (action === 'import_cold_leads') {
+      const { data: cur } = await sbAdmin.from('app_settings').select('value').eq('key', 'mc_settings').single()
+      const settings = cur?.value ? JSON.parse(cur.value) : {}
+      const listId = body.listId || settings.cold_list_id
+      const tagName = String(body.tagName || settings.cold_tag_name || 'cold lead').toLowerCase().trim()
+      const responsible = body.responsible || 'Rafael Chaves'
+      const segmentation = body.segmentation || 'COLD LEAD'
+
+      if (!listId) {
+        return new Response(JSON.stringify({ error: 'cold_list_id not configured. Set audience first.' }), { status: 400, headers: corsHeaders })
+      }
+
+      // Find the static segment whose name matches the tag (Mailchimp exposes tags as static segments)
+      const segData = await mcFetch(`/lists/${listId}/segments?type=static&count=1000`)
+      const seg = (segData.segments || []).find((s: any) => String(s.name || '').toLowerCase().trim() === tagName)
+      if (!seg) {
+        return new Response(JSON.stringify({ error: `Tag "${tagName}" not found in list ${listId}`, imported: [], skipped: 0, total: 0 }), { headers: corsHeaders })
+      }
+
+      // Paginate members of that segment
+      const members: any[] = []
+      let offset = 0
+      const pageSize = 1000
+      while (true) {
+        const data = await mcFetch(`/lists/${listId}/segments/${seg.id}/members?count=${pageSize}&offset=${offset}&fields=members.email_address,members.merge_fields,members.timestamp_signup,members.status`)
+        const batch = data.members || []
+        members.push(...batch)
+        if (batch.length < pageSize) break
+        offset += pageSize
+        if (offset > 50000) break // safety
+      }
+
+      const candidates = members.filter((m: any) => m.email_address && (m.status === 'subscribed' || !m.status))
+
+      // Lookup existing emails
+      const emails = candidates.map((m: any) => String(m.email_address).toLowerCase())
+      let existingSet = new Set<string>()
+      if (emails.length) {
+        const { data: existing } = await sbAdmin.from('leads').select('email').in('email', emails)
+        existingSet = new Set((existing || []).map((r: any) => String(r.email || '').toLowerCase()))
+        // Also check raw-cased emails (in case stored unlowercased)
+        const rawEmails = candidates.map((m: any) => m.email_address)
+        const { data: existing2 } = await sbAdmin.from('leads').select('email').in('email', rawEmails)
+        ;(existing2 || []).forEach((r: any) => existingSet.add(String(r.email || '').toLowerCase()))
+      }
+
+      // Get next ID
+      const { data: maxRows } = await sbAdmin.from('leads').select('id').order('id', { ascending: false }).limit(1)
+      let nextId = ((maxRows && maxRows[0]?.id) || 0) + 1
+
+      const imported: any[] = []
+      const nowIso = new Date().toISOString()
+
+      for (const m of candidates) {
+        const email = String(m.email_address).toLowerCase()
+        if (existingSet.has(email)) continue
+        const fname = (m.merge_fields?.FNAME || '').trim()
+        const lname = (m.merge_fields?.LNAME || '').trim()
+        const contact = (fname + ' ' + lname).trim() || null
+        const company = (m.merge_fields?.COMPANY || m.merge_fields?.MMERGE5 || contact || email.split('@')[0]).toString().trim()
+        const phone = m.merge_fields?.PHONE || null
+        const id = nextId++
+
+        const leadRow: any = {
+          id,
+          company,
+          contact,
+          email: m.email_address,
+          phone,
+          pipeline: segmentation,
+          responsible,
+        }
+        const { error: leadErr } = await sbAdmin.from('leads').insert(leadRow)
+        if (leadErr) {
+          // Likely duplicate id race or constraint; skip
+          continue
+        }
+
+        await sbAdmin.from('lead_states').insert({
+          lead_id: id,
+          responsible,
+          cs: 'novo',
+          tags: [],
+          mkt_tag: JSON.stringify(['Cold']),
+          priority: false,
+          call_count: 0,
+          timeline: [{ ts: nowIso, v: 'Mailchimp Sync', txt: '📥 Imported from Mailchimp · tag "' + tagName + '"', type: 'cold_import' }],
+          updated_at: nowIso,
+        })
+
+        imported.push({ id, email: m.email_address, contact, company })
+        existingSet.add(email)
+      }
+
+      // Ensure segmentation exists
+      const { data: segCur } = await sbAdmin.from('app_settings').select('value').eq('key', 'segmentations').single()
+      let segArr: string[] = []
+      try { segArr = segCur?.value ? JSON.parse(segCur.value) : [] } catch (_) { segArr = [] }
+      if (!segArr.includes(segmentation)) {
+        segArr.push(segmentation)
+        segArr.sort()
+        await sbAdmin.from('app_settings').upsert({ key: 'segmentations', value: JSON.stringify(segArr) }, { onConflict: 'key' })
+      }
+
+      // Track last sync timestamp
+      await sbAdmin.from('app_settings').upsert({ key: 'mc_cold_last_sync', value: nowIso }, { onConflict: 'key' })
+
+      return new Response(JSON.stringify({ ok: true, imported, skipped: candidates.length - imported.length, total: candidates.length, segment: seg.name }), { headers: corsHeaders })
     }
 
     // ── SET TAG ───────────────────────────────────────────────
