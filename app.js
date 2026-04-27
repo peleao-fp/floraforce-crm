@@ -2877,8 +2877,18 @@ function renderBulkPreview() {
   }
 
   if (total > 0) {
-    html += '<div style="margin-top:14px;display:flex;gap:10px">'
-      + '<button class="btn btn-primary" onclick="applyBulkImport()" style="padding:8px 20px">✅ Apply (' + (newLeads.length ? newLeads.length + ' new' : '') + (newLeads.length && updates.length ? ' + ' : '') + (updates.length ? updates.length + ' updates' : '') + ')</button>'
+    let buttons = '';
+    if (newLeads.length > 0 && updates.length > 0) {
+      buttons += '<button class="btn btn-primary bulk-apply-btn" onclick="applyBulkImport(\'all\')" style="padding:8px 20px">✅ Apply All (' + newLeads.length + ' new + ' + updates.length + ' updates)</button>';
+      buttons += '<button class="btn btn-ghost bulk-apply-btn" onclick="applyBulkImport(\'new\')" style="padding:8px 20px">🆕 Only New (' + newLeads.length + ')</button>';
+      buttons += '<button class="btn btn-ghost bulk-apply-btn" onclick="applyBulkImport(\'updates\')" style="padding:8px 20px">✏️ Only Updates (' + updates.length + ')</button>';
+    } else if (newLeads.length > 0) {
+      buttons += '<button class="btn btn-primary bulk-apply-btn" onclick="applyBulkImport(\'new\')" style="padding:8px 20px">✅ Apply (' + newLeads.length + ' new)</button>';
+    } else {
+      buttons += '<button class="btn btn-primary bulk-apply-btn" onclick="applyBulkImport(\'updates\')" style="padding:8px 20px">✅ Apply (' + updates.length + ' updates)</button>';
+    }
+    html += '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">'
+      + buttons
       + '<button class="btn btn-ghost" onclick="cancelBulkImport()">Cancel</button>'
       + '</div>';
   }
@@ -2886,13 +2896,17 @@ function renderBulkPreview() {
   el.innerHTML = html;
 }
 
-async function applyBulkImport() {
-  const newLeads = bulkPreviewData.filter(r => r.isNew);
-  const updates  = bulkPreviewData.filter(r => !r.isNew && !r.error);
+async function applyBulkImport(mode = 'all') {
+  let newLeads = bulkPreviewData.filter(r => r.isNew);
+  let updates  = bulkPreviewData.filter(r => !r.isNew && !r.error);
+  if (mode === 'new')     updates  = [];
+  if (mode === 'updates') newLeads = [];
   if (!newLeads.length && !updates.length) return;
 
-  const btn = document.querySelector('[onclick="applyBulkImport()"]');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Applying...'; }
+  const applyBtns = document.querySelectorAll('.bulk-apply-btn');
+  applyBtns.forEach(b => { b.disabled = true; });
+  const activeBtn = Array.from(applyBtns).find(b => (b.getAttribute('onclick') || '').includes("'" + mode + "'"));
+  if (activeBtn) activeBtn.textContent = '⏳ Applying...';
 
   let created = 0, updated = 0, errors = 0;
 
@@ -3006,7 +3020,6 @@ async function applyBulkImport() {
 
   logActivity(null, null, 'field_edit', 'Bulk CSV: ' + created + ' created, ' + updated + ' updated');
   showToast('✅ ' + created + ' created · ' + updated + ' updated');
-  if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
 }
 
 function cancelBulkImport() {
