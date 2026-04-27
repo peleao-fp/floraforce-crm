@@ -2006,6 +2006,33 @@ async function loadMktPanel() {
   refreshMktPreview();
   // Sync MC engagement in background
   syncMailchimpEngagement();
+  // Sync Cold Leads from Mailchimp in background
+  syncColdLeadsBackground();
+}
+
+async function syncColdLeadsBackground() {
+  try {
+    const res = await mcCall('import_cold_leads');
+    if (!res || res.error) {
+      // Likely "cold_list_id not configured" on first run — silent
+      return;
+    }
+    const n = res.imported?.length || 0;
+    if (n > 0) {
+      await loadLeads();
+      await loadLeadStates();
+      await loadSegmentations();
+      applyFilters();
+      if (typeof refreshMktPreview === 'function') refreshMktPreview();
+      refreshColdLeadNotifications({ announceNew: true });
+      const status = document.getElementById('cold-import-status');
+      if (status) status.textContent = '✅ Auto-synced · ' + n + ' new';
+    } else {
+      refreshColdLeadNotifications();
+    }
+  } catch(e) {
+    console.warn('Cold lead sync failed:', e.message);
+  }
 }
 
 async function loadMcSettings() {
