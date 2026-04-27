@@ -1325,15 +1325,50 @@ function setStatus(s) {
   );
   if (old !== s) logActivity(currentLead.id, currentLead.c, 'status_change', old + ' → ' + s);
 }
-async function registerCall() {
+function registerCall() {
   if (!currentLead) return;
+  const cl = document.querySelector('.call-log');
+  if (!cl) return;
+  const summary = 'Total: <strong style="color:var(--accent)">' + (currentLead.cc || 0) + '</strong>'
+    + (currentLead.lc ? ' · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>' : ' · None');
+  cl.innerHTML = summary
+    + '<div style="margin-top:10px">'
+    + '<textarea id="call-note-input" class="modal-textarea" placeholder="Anotação da ligação (opcional)" style="min-height:70px"></textarea>'
+    + '<div style="margin-top:6px;display:flex;gap:8px">'
+    + '<button class="btn btn-primary" onclick="confirmCallLog()">📞 Save call</button>'
+    + '<button class="btn btn-ghost" onclick="cancelCallLog()">Cancel</button>'
+    + '</div></div>';
+  const inp = document.getElementById('call-note-input');
+  if (inp) inp.focus();
+}
+
+function confirmCallLog() {
+  if (!currentLead) return;
+  const inp  = document.getElementById('call-note-input');
+  const note = (inp?.value || '').trim();
   currentLead.cc = (currentLead.cc || 0) + 1;
   currentLead.lc = new Date().toISOString();
   if (currentLead.cs === 'novo') currentLead.cs = 'contatado';
-  logActivity(currentLead.id, currentLead.c, 'call', 'Call #' + currentLead.cc);
-  showToast('📞 Call logged!');
+  if (!currentLead.tl) currentLead.tl = [];
+  currentLead.tl.push({
+    ts:   currentLead.lc,
+    v:    currentProfile?.name || '—',
+    txt:  '📞 Call #' + currentLead.cc + (note ? ' — ' + note : ''),
+    type: 'call'
+  });
+  logActivity(currentLead.id, currentLead.c, 'call', 'Call #' + currentLead.cc + (note ? ' — ' + note.substring(0, 80) : ''));
+  showToast(note ? '📞 Call + note logged!' : '📞 Call logged!');
+  renderTimeline();
   const cl = document.querySelector('.call-log');
   if (cl) cl.innerHTML = 'Total: <strong style="color:var(--accent)">' + currentLead.cc + '</strong> · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>';
+}
+
+function cancelCallLog() {
+  if (!currentLead) return;
+  const cl = document.querySelector('.call-log');
+  if (!cl) return;
+  cl.innerHTML = 'Total: <strong style="color:var(--accent)">' + (currentLead.cc || 0) + '</strong>'
+    + (currentLead.lc ? ' · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>' : ' · None');
 }
 async function saveModal() {
   if (!currentLead) return;
