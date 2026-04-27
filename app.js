@@ -1047,9 +1047,13 @@ async function openModal(id) {
   const quoteBtn = hasPermission('create_quotes')
     ? '<button class="btn btn-ghost" onclick="openQuoteModal(' + lead.id + ')">📄 Quote</button>'
     : '';
+  const lostBtn = ((lead.p || '') !== 'LOST LEAD')
+    ? '<button class="btn btn-ghost" onclick="markAsLost()" style="color:var(--danger);border-color:rgba(239,68,68,.4)">❌ Lost Lead</button>'
+    : '';
   document.getElementById('modal-footer').innerHTML =
     deleteBtn
     + quoteBtn
+    + lostBtn
     + '<button class="btn btn-ghost" onclick="registerCall()">📞 Log Call</button>'
     + '<button class="btn btn-primary" onclick="saveModal()">💾 Save</button>';
 
@@ -1196,6 +1200,47 @@ async function updateLeadPipeline(select) {
   logActivity(currentLead.id, currentLead.c, 'field_edit', 'pipeline: "' + oldVal + '" → "' + newVal + '"');
   showToast('✅ Pipeline updated');
   applyFilters();
+}
+
+async function markAsLost() {
+  if (!currentLead) return;
+  const isOwn = (currentLead.responsible || currentLead.r) === currentProfile?.name;
+  if (!isOwn && !hasPermission('edit_any_lead')) {
+    showToast('⚠️ No permission to edit this lead');
+    return;
+  }
+  if (!confirm('Mark "' + (currentLead.c || 'this lead') + '" as Lost Lead?\n\nIt will move to the LOST LEAD segmentation and the MKT tag will be set to "Lost Lead".')) return;
+
+  const oldPipeline = currentLead.p || '';
+  const oldMktTag   = currentLead.mkt_tag;
+
+  currentLead.p       = 'LOST LEAD';
+  currentLead.mkt_tag = ['Lost Lead'];
+
+  const { error } = await sb.from('leads').update({ pipeline: 'LOST LEAD' }).eq('id', currentLead.id);
+  if (error) {
+    currentLead.p       = oldPipeline;
+    currentLead.mkt_tag = oldMktTag;
+    showToast('❌ Error: ' + error.message);
+    return;
+  }
+
+  await saveLeadState(currentLead);
+
+  if (!mktTagTypes.includes('Lost Lead')) {
+    mktTagTypes.push('Lost Lead');
+    await saveMktTagTypes();
+  }
+  if (!segmentations.includes('LOST LEAD')) {
+    segmentations.push('LOST LEAD');
+    segmentations.sort();
+    await saveSegmentations();
+  }
+
+  logActivity(currentLead.id, currentLead.c, 'field_edit', 'Marked as Lost Lead (segmentation: "' + oldPipeline + '" → LOST LEAD)');
+  showToast('❌ Lead marked as Lost');
+  applyFilters();
+  closeModal();
 }
 
 async function updateLeadField(input) {
