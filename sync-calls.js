@@ -23,20 +23,35 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-async function getCallLogs(token) {
+function defaultWeekRange() {
   // Week = Sunday 00:00 UTC → now
   const now       = new Date();
   const dayOfWeek = now.getUTCDay(); // 0=Sun
   const dateFrom  = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
   dateFrom.setUTCHours(0, 0, 0, 0);
+  return { dateFrom, dateTo: now };
+}
 
+function chunkMonths(from, to) {
+  const ranges = [];
+  let cur = new Date(from);
+  while (cur < to) {
+    const next = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1, 0, 0, 0));
+    const end  = next < to ? next : to;
+    ranges.push({ dateFrom: new Date(cur), dateTo: new Date(end) });
+    cur = next;
+  }
+  return ranges;
+}
+
+async function getCallLogs(token, dateFrom, dateTo) {
   const params = new URLSearchParams({
     dateFrom: dateFrom.toISOString(),
-    dateTo:   now.toISOString()
+    dateTo:   dateTo.toISOString()
   });
 
   const url = 'https://api.intermedia.net/analytics/usageHistory?' + params.toString();
-  console.log('📞 Fetching calls:', dateFrom.toISOString(), '→', now.toISOString());
+  console.log('📞 Fetching:', dateFrom.toISOString(), '→', dateTo.toISOString());
 
   const res = await fetch(url, {
     method:  'GET',
@@ -47,10 +62,7 @@ async function getCallLogs(token) {
   const data  = await res.json();
   const all   = data.calls || data.items || data.records || data.data || data.results || (Array.isArray(data) ? data : []);
   const calls = all.filter(c => (c.direction || '').toLowerCase() === 'outbound');
-  console.log('📞 Retrieved', all.length, 'calls,', calls.length, 'outbound');
-  if (calls.length > 0) {
-    console.log('  Sample call:', JSON.stringify(calls[0]).substring(0, 250));
-  }
+  console.log('  ↳ retrieved', all.length, 'calls,', calls.length, 'outbound');
   return calls;
 }
 
@@ -62,11 +74,20 @@ async function getLeads() {
 }
 
 async function getSyncedCallIds() {
-  const url = SUPABASE_URL + '/rest/v1/intermedia_call_log?select=call_id&limit=10000';
-  const res = await fetch(url, { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY } });
-  if (!res.ok) return new Set();
-  const rows = await res.json();
-  return new Set(rows.map(r => r.call_id));
+  const ids = new Set();
+  const pageSize = 10000;
+  let offset = 0;
+  while (true) {
+    const url = SUPABASE_URL + '/rest/v1/intermedia_call_log?select=call_id&limit=' + pageSize + '&offset=' + offset;
+    const res = await fetch(url, { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY } });
+    if (!res.ok) break;
+    const rows = await res.json();
+    rows.forEach(r => ids.add(r.call_id));
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+    if (offset > 500000) break; // safety
+  }
+  return ids;
 }
 
 function normalizePhone(phone) {
@@ -185,22 +206,53 @@ async function saveCallLog(call, leadId) {
   return true;
 }
 
+async function processCalls(calls, phoneMap, synced) {
+  let matched = 0, savedUnmatched = 0, skipped = 0;
+  for (const call of calls) {
+    const callId = call.id || call.callId || call.globalCallId;
+    if (callId && synced.has(String(callId))) { skipped++; continue; }
+
+    const customerPhone = call.direction === 'outbound'
+      ? (call.to   && call.to.number)
+      : (call.from && call.from.number);
+    const norm = normalizePhone(customerPhone);
+    const lead = norm ? phoneMap.get(norm) : null;
+
+    const saved = await saveCallLog(call, lead ? lead.id : null);
+    if (saved) {
+      if (lead) matched++;
+      else {
+        savedUnmatched++;
+        if (call.direction === 'outbound') {
+          console.log('  📞 Saved (no lead):', extractUserName(call) || 'Unknown', '→', customerPhone);
+        }
+      }
+      if (callId) synced.add(String(callId));
+    } else {
+      skipped++;
+    }
+  }
+  return { matched, savedUnmatched, skipped };
+}
+
 async function main() {
+  const fromEnv = process.env.SYNC_FROM ? new Date(process.env.SYNC_FROM + 'T00:00:00.000Z') : null;
+  const toEnv   = process.env.SYNC_TO   ? new Date(process.env.SYNC_TO   + 'T23:59:59.999Z') : (fromEnv ? new Date() : null);
+  const isBackfill = !!fromEnv;
+
   console.log('🌸 FloraForce Intermedia Sync started:', new Date().toISOString());
+  if (isBackfill) console.log('🗓  Backfill mode:', fromEnv.toISOString(), '→', toEnv.toISOString());
+
   try {
     const token  = await getAccessToken();
-    const calls  = await getCallLogs(token);
-    if (!calls.length) { console.log('ℹ️  No calls in last 24 hours.'); return; }
-
     const leads  = await getLeads();
     const synced = await getSyncedCallIds();
+    console.log('📦 Already in DB:', synced.size, 'calls · Leads:', leads.length);
 
-    // Build phone → lead map
     const phoneMap = new Map();
     leads.forEach(l => {
-      // Handle multiple phones separated by ; or ,
       const allPhones = [
-        ...String(l.phone || '').split(/[;,]/).map(p => p.trim()),
+        ...String(l.phone  || '').split(/[;,]/).map(p => p.trim()),
         ...String(l.phone2 || '').split(/[;,]/).map(p => p.trim()),
       ].filter(Boolean);
       allPhones.forEach(ph => {
@@ -209,42 +261,21 @@ async function main() {
       });
     });
 
-    let matched = 0, savedUnmatched = 0, skipped = 0;
+    const ranges = isBackfill
+      ? chunkMonths(fromEnv, toEnv)
+      : [defaultWeekRange()];
 
-    for (const call of calls) {
-      const callId = call.id || call.callId || call.globalCallId;
-
-      // Skip already synced
-      if (callId && synced.has(String(callId))) { skipped++; continue; }
-
-      // Try to match lead by phone
-      const customerPhone = call.direction === 'outbound'
-        ? (call.to   && call.to.number)
-        : (call.from && call.from.number);
-
-      const norm = normalizePhone(customerPhone);
-      const lead = norm ? phoneMap.get(norm) : null;
-
-      // Save ALL calls — with or without lead match
-      const saved = await saveCallLog(call, lead ? lead.id : null);
-
-      if (saved) {
-        if (lead) {
-          matched++;
-        } else {
-          savedUnmatched++;
-          const userName = extractUserName(call) || 'Unknown';
-          // Only log unmatched for outbound to reduce noise
-          if (call.direction === 'outbound') {
-            console.log('  📞 Saved (no lead):', userName, '→', customerPhone);
-          }
-        }
-      } else {
-        skipped++;
-      }
+    let totalMatched = 0, totalUnmatched = 0, totalSkipped = 0;
+    for (const r of ranges) {
+      const calls = await getCallLogs(token, r.dateFrom, r.dateTo);
+      if (!calls.length) continue;
+      const stats = await processCalls(calls, phoneMap, synced);
+      totalMatched += stats.matched;
+      totalUnmatched += stats.savedUnmatched;
+      totalSkipped += stats.skipped;
     }
 
-    console.log('🎉 Done — Matched leads:', matched, '| Saved (no lead):', savedUnmatched, '| Skipped:', skipped);
+    console.log('🎉 Done — Matched:', totalMatched, '| Saved (no lead):', totalUnmatched, '| Skipped:', totalSkipped);
   } catch (err) {
     console.error('❌ Sync error:', err.message);
     process.exit(1);
