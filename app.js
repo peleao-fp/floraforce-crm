@@ -101,7 +101,7 @@ async function loadApp(user) {
   await loadSegmentations();
 
   // Cold-lead notifications (admins/mkt only)
-  refreshColdLeadNotifications({ announceNew: true });
+  refreshNotifications({ announceNew: true });
 
   setLoader('Ready!', 100);
   setTimeout(() => {
@@ -2069,11 +2069,11 @@ async function syncColdLeadsBackground() {
       await loadSegmentations();
       applyFilters();
       if (typeof refreshMktPreview === 'function') refreshMktPreview();
-      refreshColdLeadNotifications({ announceNew: true });
+      refreshNotifications({ announceNew: true });
       const status = document.getElementById('cold-import-status');
       if (status) status.textContent = '✅ Auto-synced · ' + n + ' new';
     } else {
-      refreshColdLeadNotifications();
+      refreshNotifications();
     }
   } catch(e) {
     console.warn('Cold lead sync failed:', e.message);
@@ -2210,7 +2210,7 @@ async function importColdLeadsNow() {
       await loadSegmentations();
       applyFilters();
       if (typeof refreshMktPreview === 'function') refreshMktPreview();
-      refreshColdLeadNotifications();
+      refreshNotifications();
     }
   } catch(e) {
     if (status) status.textContent = '❌ ' + e.message;
@@ -2542,7 +2542,7 @@ function showToast(msg) {
   setTimeout(() => t.remove(), 3000);
 }
 
-// ── COLD-LEAD NOTIFICATIONS ───────────────────────────────────
+// ── NOTIFICATIONS ─────────────────────────────────────────────
 function isColdLead(l) {
   if (!l) return false;
   if ((l.p || '') === 'COLD LEAD') return true;
@@ -2565,58 +2565,120 @@ function saveSeenColdIds(set) {
   try { localStorage.setItem('cold_seen_ids', JSON.stringify([...set])); } catch(e) {}
 }
 
-function refreshColdLeadNotifications(opts) {
+function getSeenXferIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('xfer_seen_ids') || '[]')); }
+  catch(e) { return new Set(); }
+}
+
+function saveSeenXferIds(set) {
+  try { localStorage.setItem('xfer_seen_ids', JSON.stringify([...set])); } catch(e) {}
+}
+
+let receivedTransfers = [];
+
+async function loadReceivedTransfers() {
+  if (!currentProfile?.name) { receivedTransfers = []; return; }
+  const name = currentProfile.name;
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await sb.from('activity_log')
+    .select('id,user_name,lead_id,lead_name,detail,created_at')
+    .eq('action', 'transfer')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  receivedTransfers = (data || []).filter(r => {
+    const detail = (r.detail || '').trim();
+    return detail.endsWith('→ ' + name) && r.user_name !== name;
+  });
+}
+
+async function refreshNotifications(opts) {
   const badge = document.getElementById('notif-badge');
   const btn   = document.getElementById('btn-notifications');
   const dd    = document.getElementById('notif-dropdown');
   if (!badge || !btn || !dd) return;
 
-  const role = currentProfile?.role || '';
-  if (role !== 'admin' && role !== 'mkt') {
+  // Bell is hidden only if user is not logged in
+  if (!currentProfile) {
     badge.style.display = 'none';
     btn.style.display = 'none';
     return;
   }
   btn.style.display = '';
 
-  const cold   = getColdLeads();
-  const seen   = getSeenColdIds();
-  const unseen = cold.filter(l => !seen.has(l.id));
+  const role = currentProfile.role || '';
+  const showCold = (role === 'admin' || role === 'mkt');
 
-  if (unseen.length) {
-    badge.textContent = unseen.length > 99 ? '99+' : String(unseen.length);
+  const cold        = showCold ? getColdLeads() : [];
+  const seenCold    = getSeenColdIds();
+  const unseenCold  = cold.filter(l => !seenCold.has(l.id));
+
+  await loadReceivedTransfers();
+  const seenXfer    = getSeenXferIds();
+  const unseenXfer  = receivedTransfers.filter(r => !seenXfer.has(r.id));
+
+  const totalUnseen = unseenCold.length + unseenXfer.length;
+  if (totalUnseen) {
+    badge.textContent = totalUnseen > 99 ? '99+' : String(totalUnseen);
     badge.style.display = '';
   } else {
     badge.style.display = 'none';
   }
 
-  const sorted    = [...cold].sort((a,b) => (b.id||0) - (a.id||0));
-  const newOnes   = sorted.filter(l => !seen.has(l.id));
-  const recentOld = sorted.filter(l => seen.has(l.id)).slice(0, 8);
-
   let html = '';
-  if (!cold.length) {
-    html = '<div class="notif-empty">No cold leads yet.<br><span style="font-size:10px">They appear here when imported from Mailchimp.</span></div>';
-  } else {
-    if (newOnes.length) {
-      html += '<div class="notif-header">📥 New Cold Leads (' + newOnes.length + ')</div>';
-      html += newOnes.map(l => coldNotifItem(l, true)).join('');
+
+  // Transfer section (all roles)
+  if (receivedTransfers.length) {
+    if (unseenXfer.length) {
+      html += '<div class="notif-header">🤝 New Leads Received (' + unseenXfer.length + ')</div>';
+      html += unseenXfer.map(r => xferNotifItem(r, true)).join('');
+      html += '<div style="text-align:center;padding:8px;border-top:1px solid var(--border2);margin-top:4px">'
+        + '<button class="btn btn-ghost" onclick="markAllXferSeen()" style="font-size:11px;padding:4px 10px">Mark all read</button>'
+        + '</div>';
+    }
+    const oldXfer = receivedTransfers.filter(r => seenXfer.has(r.id)).slice(0, 5);
+    if (oldXfer.length) {
+      html += '<div class="notif-header">Recent transfers</div>';
+      html += oldXfer.map(r => xferNotifItem(r, false)).join('');
+    }
+  }
+
+  // Cold-lead section (admin/mkt only)
+  if (showCold && cold.length) {
+    const sorted    = [...cold].sort((a,b) => (b.id||0) - (a.id||0));
+    const newCold   = sorted.filter(l => !seenCold.has(l.id));
+    const oldCold   = sorted.filter(l => seenCold.has(l.id)).slice(0, 8);
+    if (newCold.length) {
+      html += '<div class="notif-header">📥 New Cold Leads (' + newCold.length + ')</div>';
+      html += newCold.map(l => coldNotifItem(l, true)).join('');
       html += '<div style="text-align:center;padding:8px;border-top:1px solid var(--border2);margin-top:4px">'
         + '<button class="btn btn-ghost" onclick="markAllColdSeen()" style="font-size:11px;padding:4px 10px">Mark all read</button>'
         + '</div>';
     }
-    if (recentOld.length) {
-      html += '<div class="notif-header">Recent</div>';
-      html += recentOld.map(l => coldNotifItem(l, false)).join('');
-    }
-    if (!newOnes.length && !recentOld.length) {
-      html = '<div class="notif-empty">No new cold leads.</div>';
+    if (oldCold.length) {
+      html += '<div class="notif-header">Recent cold leads</div>';
+      html += oldCold.map(l => coldNotifItem(l, false)).join('');
     }
   }
+
+  if (!html) {
+    html = '<div class="notif-empty">No notifications.<br>'
+      + '<span style="font-size:10px">You\'ll see new leads received and (for admins) Mailchimp imports here.</span>'
+      + '</div>';
+  }
+
   dd.innerHTML = html;
 
-  if (opts?.announceNew && unseen.length) {
-    showToast('📥 ' + unseen.length + ' new cold lead' + (unseen.length === 1 ? '' : 's') + ' from Mailchimp');
+  if (opts?.announceNew) {
+    if (unseenXfer.length) {
+      const first = unseenXfer[0];
+      const leadName = first.lead_name ? ' — ' + first.lead_name : '';
+      const more = unseenXfer.length > 1 ? ' (+' + (unseenXfer.length - 1) + ' more)' : '';
+      showToast('🤝 You have received a new lead' + leadName + more);
+    }
+    if (showCold && unseenCold.length) {
+      showToast('📥 ' + unseenCold.length + ' new cold lead' + (unseenCold.length === 1 ? '' : 's') + ' from Mailchimp');
+    }
   }
 }
 
@@ -2630,14 +2692,25 @@ function coldNotifItem(l, isNew) {
     + '</div>';
 }
 
-function toggleNotifications(event) {
+function xferNotifItem(r, isNew) {
+  const leadName = r.lead_name || ('Lead #' + r.lead_id);
+  const fromName = (r.detail || '').split('→')[0].trim() || 'Unknown';
+  const when     = r.created_at ? new Date(r.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const dot      = isNew ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:middle"></span>' : '';
+  return '<div class="notif-item" onclick="openTransferLead(\'' + r.id + '\',' + (r.lead_id || 'null') + ')">'
+    + '<div style="font-weight:' + (isNew ? '600' : '500') + ';font-size:13px' + (isNew ? ';color:var(--accent)' : '') + '">' + dot + 'You received a new lead — ' + esc(leadName) + '</div>'
+    + '<div style="font-size:11px;color:var(--text3)">From ' + esc(fromName) + (when ? ' · ' + when : '') + '</div>'
+    + '</div>';
+}
+
+async function toggleNotifications(event) {
   if (event) event.stopPropagation();
   const dd = document.getElementById('notif-dropdown');
   if (!dd) return;
   const willOpen = dd.style.display === 'none' || !dd.style.display;
   dd.style.display = willOpen ? 'block' : 'none';
   if (willOpen) {
-    refreshColdLeadNotifications();
+    await refreshNotifications();
     setTimeout(() => document.addEventListener('click', closeNotifOnOutside, { once: true }), 0);
   }
 }
@@ -2659,15 +2732,33 @@ function openColdLead(id) {
   saveSeenColdIds(seen);
   const dd = document.getElementById('notif-dropdown');
   if (dd) dd.style.display = 'none';
-  refreshColdLeadNotifications();
+  refreshNotifications();
   if (typeof openModal === 'function') openModal(id);
+}
+
+function openTransferLead(xferId, leadId) {
+  const seen = getSeenXferIds();
+  seen.add(xferId);
+  saveSeenXferIds(seen);
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) dd.style.display = 'none';
+  refreshNotifications();
+  if (leadId && typeof openModal === 'function') openModal(leadId);
 }
 
 function markAllColdSeen() {
   const seen = getSeenColdIds();
   getColdLeads().forEach(l => seen.add(l.id));
   saveSeenColdIds(seen);
-  refreshColdLeadNotifications();
+  refreshNotifications();
+  showToast('✅ Marked as read');
+}
+
+function markAllXferSeen() {
+  const seen = getSeenXferIds();
+  (receivedTransfers || []).forEach(r => seen.add(r.id));
+  saveSeenXferIds(seen);
+  refreshNotifications();
   showToast('✅ Marked as read');
 }
 
