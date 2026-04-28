@@ -100,6 +100,9 @@ async function loadApp(user) {
   // Load segmentations
   await loadSegmentations();
 
+  // Cold-lead notifications (admins/mkt only)
+  refreshNotifications({ announceNew: true });
+
   setLoader('Ready!', 100);
   setTimeout(() => {
     hideLoader();
@@ -1044,9 +1047,13 @@ async function openModal(id) {
   const quoteBtn = hasPermission('create_quotes')
     ? '<button class="btn btn-ghost" onclick="openQuoteModal(' + lead.id + ')">📄 Quote</button>'
     : '';
+  const lostBtn = ((lead.p || '') !== 'LOST LEAD')
+    ? '<button class="btn btn-ghost" onclick="markAsLost()" style="color:var(--danger);border-color:rgba(239,68,68,.4)">❌ Lost Lead</button>'
+    : '';
   document.getElementById('modal-footer').innerHTML =
     deleteBtn
     + quoteBtn
+    + lostBtn
     + '<button class="btn btn-ghost" onclick="registerCall()">📞 Log Call</button>'
     + '<button class="btn btn-primary" onclick="saveModal()">💾 Save</button>';
 
@@ -1193,6 +1200,47 @@ async function updateLeadPipeline(select) {
   logActivity(currentLead.id, currentLead.c, 'field_edit', 'pipeline: "' + oldVal + '" → "' + newVal + '"');
   showToast('✅ Pipeline updated');
   applyFilters();
+}
+
+async function markAsLost() {
+  if (!currentLead) return;
+  const isOwn = (currentLead.responsible || currentLead.r) === currentProfile?.name;
+  if (!isOwn && !hasPermission('edit_any_lead')) {
+    showToast('⚠️ No permission to edit this lead');
+    return;
+  }
+  if (!confirm('Mark "' + (currentLead.c || 'this lead') + '" as Lost Lead?\n\nIt will move to the LOST LEAD segmentation and the MKT tag will be set to "Lost Lead".')) return;
+
+  const oldPipeline = currentLead.p || '';
+  const oldMktTag   = currentLead.mkt_tag;
+
+  currentLead.p       = 'LOST LEAD';
+  currentLead.mkt_tag = ['Lost Lead'];
+
+  const { error } = await sb.from('leads').update({ pipeline: 'LOST LEAD' }).eq('id', currentLead.id);
+  if (error) {
+    currentLead.p       = oldPipeline;
+    currentLead.mkt_tag = oldMktTag;
+    showToast('❌ Error: ' + error.message);
+    return;
+  }
+
+  await saveLeadState(currentLead);
+
+  if (!mktTagTypes.includes('Lost Lead')) {
+    mktTagTypes.push('Lost Lead');
+    await saveMktTagTypes();
+  }
+  if (!segmentations.includes('LOST LEAD')) {
+    segmentations.push('LOST LEAD');
+    segmentations.sort();
+    await saveSegmentations();
+  }
+
+  logActivity(currentLead.id, currentLead.c, 'field_edit', 'Marked as Lost Lead (segmentation: "' + oldPipeline + '" → LOST LEAD)');
+  showToast('❌ Lead marked as Lost');
+  applyFilters();
+  closeModal();
 }
 
 async function updateLeadField(input) {
@@ -2038,6 +2086,33 @@ async function loadMktPanel() {
   refreshMktPreview();
   // Sync MC engagement in background
   syncMailchimpEngagement();
+  // Sync Cold Leads from Mailchimp in background
+  syncColdLeadsBackground();
+}
+
+async function syncColdLeadsBackground() {
+  try {
+    const res = await mcCall('import_cold_leads');
+    if (!res || res.error) {
+      // Likely "cold_list_id not configured" on first run — silent
+      return;
+    }
+    const n = res.imported?.length || 0;
+    if (n > 0) {
+      await loadLeads();
+      await loadLeadStates();
+      await loadSegmentations();
+      applyFilters();
+      if (typeof refreshMktPreview === 'function') refreshMktPreview();
+      refreshNotifications({ announceNew: true });
+      const status = document.getElementById('cold-import-status');
+      if (status) status.textContent = '✅ Auto-synced · ' + n + ' new';
+    } else {
+      refreshNotifications();
+    }
+  } catch(e) {
+    console.warn('Cold lead sync failed:', e.message);
+  }
 }
 
 async function loadMcSettings() {
@@ -2078,6 +2153,31 @@ function renderMcSettings(settings, allLists) {
     + (settings.main_list_id ? '<span style="font-size:11px;color:var(--accent)">✅ Active</span>' : '<span style="font-size:11px;color:var(--warn)">⚠️ Not set</span>')
     + '</div></div>';
 
+  // Cold Lead import
+  const coldListId = settings.cold_list_id || '';
+  const coldTag    = settings.cold_tag_name || 'cold lead';
+  html += '<div style="border-top:1px solid var(--border2);padding-top:14px">'
+    + '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;font-weight:600">📥 Cold Leads — auto-import from website signups</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-bottom:10px">New subscribers tagged as "' + esc(coldTag) + '" inside the chosen audience are imported as <strong style="color:var(--text2)">COLD LEAD</strong> assigned to <strong style="color:var(--text2)">Rafael Chaves</strong>.</div>'
+    + '<div style="display:flex;flex-direction:column;gap:8px">'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+        + '<div style="min-width:130px;font-size:12px;color:var(--text2)">Audience</div>'
+        + '<select class="form-select" style="flex:1" id="mc-cold-list-sel" onchange="setMcColdList(this.value)">'
+        + listOptions(coldListId)
+        + '</select>'
+        + (coldListId ? '<span style="font-size:11px;color:var(--accent)">✅</span>' : '<span style="font-size:11px;color:var(--warn)">⚠️</span>')
+      + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+        + '<div style="min-width:130px;font-size:12px;color:var(--text2)">Tag name</div>'
+        + '<input class="form-input" id="mc-cold-tag-input" value="' + esc(coldTag) + '" style="flex:1" onblur="setMcColdTag(this.value)" onkeydown="if(event.key===\'Enter\')this.blur()">'
+      + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;margin-top:4px">'
+        + '<button class="btn btn-primary" onclick="importColdLeadsNow()" id="cold-import-btn" style="font-size:12px;padding:7px 14px">📥 Import Now</button>'
+        + '<span id="cold-import-status" style="font-size:11px;color:var(--text3)"></span>'
+      + '</div>'
+    + '</div>'
+  + '</div>';
+
   // Tag lists
   html += '<div>'
     + '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px;font-weight:600">Tag Lists — one per MKT Tag</div>'
@@ -2108,6 +2208,51 @@ async function setMcTagList(tag, listId) {
   await mcCall('set_tag_list', { tag, listId });
   showToast(listId ? '✅ List set for "' + tag + '"' : '🗑 List removed for "' + tag + '"');
   await loadMcSettings();
+}
+
+async function setMcColdList(listId) {
+  await mcCall('set_cold_config', { listId });
+  showToast(listId ? '✅ Cold-lead audience set' : '🗑 Cold-lead audience removed');
+  await loadMcSettings();
+}
+
+async function setMcColdTag(tagName) {
+  const v = (tagName || '').trim();
+  if (!v) return;
+  await mcCall('set_cold_config', { tagName: v });
+  showToast('✅ Cold tag set to "' + v + '"');
+}
+
+async function importColdLeadsNow() {
+  const status = document.getElementById('cold-import-status');
+  const btn    = document.getElementById('cold-import-btn');
+  if (status) status.textContent = 'Importing...';
+  if (btn) btn.disabled = true;
+  try {
+    const res = await mcCall('import_cold_leads');
+    if (res.error) {
+      if (status) status.textContent = '❌ ' + res.error;
+      showToast('❌ ' + res.error);
+      return;
+    }
+    const n = res.imported?.length || 0;
+    const s = res.skipped || 0;
+    if (status) status.textContent = '✅ ' + n + ' imported · ' + s + ' already existed (' + (res.total || 0) + ' total)';
+    showToast(n ? '📥 ' + n + ' new cold leads imported' : 'ℹ️ No new cold leads (' + s + ' already in CRM)');
+    if (n) {
+      await loadLeads();
+      await loadLeadStates();
+      await loadSegmentations();
+      applyFilters();
+      if (typeof refreshMktPreview === 'function') refreshMktPreview();
+      refreshNotifications();
+    }
+  } catch(e) {
+    if (status) status.textContent = '❌ ' + e.message;
+    showToast('❌ Import failed: ' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 async function loadMcAudiences() {
   const sel = document.getElementById('mkt-audience-select');
@@ -2430,6 +2575,226 @@ function showToast(msg) {
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+// ── NOTIFICATIONS ─────────────────────────────────────────────
+function isColdLead(l) {
+  if (!l) return false;
+  if ((l.p || '') === 'COLD LEAD') return true;
+  const t = l.mkt_tag;
+  if (Array.isArray(t)) return t.some(x => String(x).toLowerCase() === 'cold');
+  if (typeof t === 'string') return t.toLowerCase().includes('cold');
+  return false;
+}
+
+function getColdLeads() {
+  return (leads || []).filter(isColdLead);
+}
+
+function getSeenColdIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('cold_seen_ids') || '[]')); }
+  catch(e) { return new Set(); }
+}
+
+function saveSeenColdIds(set) {
+  try { localStorage.setItem('cold_seen_ids', JSON.stringify([...set])); } catch(e) {}
+}
+
+function getSeenXferIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('xfer_seen_ids') || '[]')); }
+  catch(e) { return new Set(); }
+}
+
+function saveSeenXferIds(set) {
+  try { localStorage.setItem('xfer_seen_ids', JSON.stringify([...set])); } catch(e) {}
+}
+
+let receivedTransfers = [];
+
+async function loadReceivedTransfers() {
+  if (!currentProfile?.name) { receivedTransfers = []; return; }
+  const name = currentProfile.name;
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await sb.from('activity_log')
+    .select('id,user_name,lead_id,lead_name,detail,created_at')
+    .eq('action', 'transfer')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  receivedTransfers = (data || []).filter(r => {
+    const detail = (r.detail || '').trim();
+    return detail.endsWith('→ ' + name) && r.user_name !== name;
+  });
+}
+
+async function refreshNotifications(opts) {
+  const badge = document.getElementById('notif-badge');
+  const btn   = document.getElementById('btn-notifications');
+  const dd    = document.getElementById('notif-dropdown');
+  if (!badge || !btn || !dd) return;
+
+  // Bell is hidden only if user is not logged in
+  if (!currentProfile) {
+    badge.style.display = 'none';
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+
+  const role = currentProfile.role || '';
+  const showCold = (role === 'admin' || role === 'mkt');
+
+  const cold        = showCold ? getColdLeads() : [];
+  const seenCold    = getSeenColdIds();
+  const unseenCold  = cold.filter(l => !seenCold.has(l.id));
+
+  await loadReceivedTransfers();
+  const seenXfer    = getSeenXferIds();
+  const unseenXfer  = receivedTransfers.filter(r => !seenXfer.has(r.id));
+
+  const totalUnseen = unseenCold.length + unseenXfer.length;
+  if (totalUnseen) {
+    badge.textContent = totalUnseen > 99 ? '99+' : String(totalUnseen);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  let html = '';
+
+  // Transfer section (all roles)
+  if (receivedTransfers.length) {
+    if (unseenXfer.length) {
+      html += '<div class="notif-header">🤝 New Leads Received (' + unseenXfer.length + ')</div>';
+      html += unseenXfer.map(r => xferNotifItem(r, true)).join('');
+      html += '<div style="text-align:center;padding:8px;border-top:1px solid var(--border2);margin-top:4px">'
+        + '<button class="btn btn-ghost" onclick="markAllXferSeen()" style="font-size:11px;padding:4px 10px">Mark all read</button>'
+        + '</div>';
+    }
+    const oldXfer = receivedTransfers.filter(r => seenXfer.has(r.id)).slice(0, 5);
+    if (oldXfer.length) {
+      html += '<div class="notif-header">Recent transfers</div>';
+      html += oldXfer.map(r => xferNotifItem(r, false)).join('');
+    }
+  }
+
+  // Cold-lead section (admin/mkt only)
+  if (showCold && cold.length) {
+    const sorted    = [...cold].sort((a,b) => (b.id||0) - (a.id||0));
+    const newCold   = sorted.filter(l => !seenCold.has(l.id));
+    const oldCold   = sorted.filter(l => seenCold.has(l.id)).slice(0, 8);
+    if (newCold.length) {
+      html += '<div class="notif-header">📥 New Cold Leads (' + newCold.length + ')</div>';
+      html += newCold.map(l => coldNotifItem(l, true)).join('');
+      html += '<div style="text-align:center;padding:8px;border-top:1px solid var(--border2);margin-top:4px">'
+        + '<button class="btn btn-ghost" onclick="markAllColdSeen()" style="font-size:11px;padding:4px 10px">Mark all read</button>'
+        + '</div>';
+    }
+    if (oldCold.length) {
+      html += '<div class="notif-header">Recent cold leads</div>';
+      html += oldCold.map(l => coldNotifItem(l, false)).join('');
+    }
+  }
+
+  if (!html) {
+    html = '<div class="notif-empty">No notifications.<br>'
+      + '<span style="font-size:10px">You\'ll see new leads received and (for admins) Mailchimp imports here.</span>'
+      + '</div>';
+  }
+
+  dd.innerHTML = html;
+
+  if (opts?.announceNew) {
+    if (unseenXfer.length) {
+      const first = unseenXfer[0];
+      const leadName = first.lead_name ? ' — ' + first.lead_name : '';
+      const more = unseenXfer.length > 1 ? ' (+' + (unseenXfer.length - 1) + ' more)' : '';
+      showToast('🤝 You have received a new lead' + leadName + more);
+    }
+    if (showCold && unseenCold.length) {
+      showToast('📥 ' + unseenCold.length + ' new cold lead' + (unseenCold.length === 1 ? '' : 's') + ' from Mailchimp');
+    }
+  }
+}
+
+function coldNotifItem(l, isNew) {
+  const title = esc(l.c || l.cn || l.em || ('Lead #' + l.id));
+  const sub   = esc([l.cn && l.c ? l.cn : '', l.em || ''].filter(Boolean).join(' · '));
+  const dot   = isNew ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:middle"></span>' : '';
+  return '<div class="notif-item" onclick="openColdLead(' + l.id + ')">'
+    + '<div style="font-weight:' + (isNew ? '600' : '500') + ';font-size:13px' + (isNew ? ';color:var(--accent)' : '') + '">' + dot + title + '</div>'
+    + (sub ? '<div style="font-size:11px;color:var(--text3)">' + sub + '</div>' : '')
+    + '</div>';
+}
+
+function xferNotifItem(r, isNew) {
+  const leadName = r.lead_name || ('Lead #' + r.lead_id);
+  const fromName = (r.detail || '').split('→')[0].trim() || 'Unknown';
+  const when     = r.created_at ? new Date(r.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const dot      = isNew ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:middle"></span>' : '';
+  return '<div class="notif-item" onclick="openTransferLead(\'' + r.id + '\',' + (r.lead_id || 'null') + ')">'
+    + '<div style="font-weight:' + (isNew ? '600' : '500') + ';font-size:13px' + (isNew ? ';color:var(--accent)' : '') + '">' + dot + 'You received a new lead — ' + esc(leadName) + '</div>'
+    + '<div style="font-size:11px;color:var(--text3)">From ' + esc(fromName) + (when ? ' · ' + when : '') + '</div>'
+    + '</div>';
+}
+
+async function toggleNotifications(event) {
+  if (event) event.stopPropagation();
+  const dd = document.getElementById('notif-dropdown');
+  if (!dd) return;
+  const willOpen = dd.style.display === 'none' || !dd.style.display;
+  dd.style.display = willOpen ? 'block' : 'none';
+  if (willOpen) {
+    await refreshNotifications();
+    setTimeout(() => document.addEventListener('click', closeNotifOnOutside, { once: true }), 0);
+  }
+}
+
+function closeNotifOnOutside(e) {
+  const dd  = document.getElementById('notif-dropdown');
+  const btn = document.getElementById('btn-notifications');
+  if (!dd) return;
+  if (dd.contains(e.target) || (btn && btn.contains(e.target))) {
+    setTimeout(() => document.addEventListener('click', closeNotifOnOutside, { once: true }), 0);
+    return;
+  }
+  dd.style.display = 'none';
+}
+
+function openColdLead(id) {
+  const seen = getSeenColdIds();
+  seen.add(id);
+  saveSeenColdIds(seen);
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) dd.style.display = 'none';
+  refreshNotifications();
+  if (typeof openModal === 'function') openModal(id);
+}
+
+function openTransferLead(xferId, leadId) {
+  const seen = getSeenXferIds();
+  seen.add(xferId);
+  saveSeenXferIds(seen);
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) dd.style.display = 'none';
+  refreshNotifications();
+  if (leadId && typeof openModal === 'function') openModal(leadId);
+}
+
+function markAllColdSeen() {
+  const seen = getSeenColdIds();
+  getColdLeads().forEach(l => seen.add(l.id));
+  saveSeenColdIds(seen);
+  refreshNotifications();
+  showToast('✅ Marked as read');
+}
+
+function markAllXferSeen() {
+  const seen = getSeenXferIds();
+  (receivedTransfers || []).forEach(r => seen.add(r.id));
+  saveSeenXferIds(seen);
+  refreshNotifications();
+  showToast('✅ Marked as read');
 }
 
 // ── NEW LEAD ──────────────────────────────────────────────────
