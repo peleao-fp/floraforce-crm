@@ -237,8 +237,8 @@ async function processCalls(calls, phoneMap, synced) {
 
 async function main() {
   const fromEnv = process.env.SYNC_FROM ? new Date(process.env.SYNC_FROM + 'T00:00:00.000Z') : null;
-  const toEnv   = process.env.SYNC_TO   ? new Date(process.env.SYNC_TO   + 'T23:59:59.999Z') : null;
-  const isBackfill = !!(fromEnv && toEnv);
+  const toEnv   = process.env.SYNC_TO   ? new Date(process.env.SYNC_TO   + 'T23:59:59.999Z') : (fromEnv ? new Date() : null);
+  const isBackfill = !!fromEnv;
 
   console.log('🌸 FloraForce Intermedia Sync started:', new Date().toISOString());
   if (isBackfill) console.log('🗓  Backfill mode:', fromEnv.toISOString(), '→', toEnv.toISOString());
