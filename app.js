@@ -912,8 +912,8 @@ function renderTable() {
     const sales   = '';
     const st      = l.st ? (l.st.split(' - ')[1] || l.st) : '—';
     const callBtn = l.ph
-      ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
-        + (l.ph2 ? '<a href="tel:' + l.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none;margin-left:2px" title="' + esc(l.ph2) + '">📞2</a>' : '')
+      ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" onclick="markContactStarted(' + l.id + ')" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
+        + (l.ph2 ? '<a href="tel:' + l.ph2.replace(/\D/g,'') + '" onclick="markContactStarted(' + l.id + ')" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none;margin-left:2px" title="' + esc(l.ph2) + '">📞2</a>' : '')
       : '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;opacity:.3" disabled>📞</button>';
     const isEngaged = l.mc_engaged && !l.mc_acknowledged;
     const mcBadge = isEngaged ? '<span class="mc-badge">📧 MC</span> ' : '';
@@ -962,6 +962,18 @@ function goPage(p) {
 }
 
 // ── QUICK CALL ────────────────────────────────────────────────
+// Fired when the vendor clicks a tel: link — marks contact immediately so the
+// no_contact filter and idle sort update without waiting for the Intermedia
+// sync. cc and timeline are intentionally left to the Intermedia sync (which
+// dedupes by call_id) to avoid double-counting.
+function markContactStarted(id) {
+  const lead = leads.find(l => l.id === id);
+  if (!lead) return;
+  lead.lc = new Date().toISOString();
+  if (lead.cs === 'novo') lead.cs = 'contatado';
+  applyFilters();
+  saveLeadState(lead);
+}
 async function quickCall(id) {
   const lead = leads.find(l => l.id === id);
   if (!lead) return;
@@ -997,8 +1009,8 @@ async function openModal(id) {
 
   const phoneHtml = lead.ph
     ? '<div style="display:flex;flex-wrap:wrap;gap:8px">'
-      + '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph) + '</a>'
-      + (lead.ph2 ? '<a href="tel:' + lead.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph2) + '</a>' : '')
+      + '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" onclick="markContactStarted(' + lead.id + ')" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph) + '</a>'
+      + (lead.ph2 ? '<a href="tel:' + lead.ph2.replace(/\D/g,'') + '" onclick="markContactStarted(' + lead.id + ')" class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph2) + '</a>' : '')
       + '</div>'
     : '<span style="color:var(--text3);font-size:12px">No phone number</span>';
 
