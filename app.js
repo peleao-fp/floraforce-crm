@@ -1390,7 +1390,7 @@ function registerCall() {
   if (inp) inp.focus();
 }
 
-function confirmCallLog() {
+async function confirmCallLog() {
   if (!currentLead) return;
   const inp  = document.getElementById('call-note-input');
   const note = (inp?.value || '').trim();
@@ -1409,6 +1409,8 @@ function confirmCallLog() {
   renderTimeline();
   const cl = document.querySelector('.call-log');
   if (cl) cl.innerHTML = 'Total: <strong style="color:var(--accent)">' + currentLead.cc + '</strong> · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>';
+  applyFilters();
+  saveLeadState(currentLead);
 }
 
 function cancelCallLog() {
