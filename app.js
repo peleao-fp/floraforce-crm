@@ -720,14 +720,18 @@ function applyFilters() {
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
-    if (activeSpecials.has('no_contact') && l.lc)          return false;
     if (search) {
       const h = (l.c + ' ' + l.cn + ' ' + l.em).toLowerCase();
       if (!h.includes(search)) return false;
     }
     return true;
   });
-  if      (sortMode === 'priority') filteredLeads.sort((a,b) => (b.pr?1:0) - (a.pr?1:0));
+  if      (activeSpecials.has('no_contact')) filteredLeads.sort((a,b) => {
+    const aT = a.lc ? new Date(a.lc).getTime() : -Infinity;
+    const bT = b.lc ? new Date(b.lc).getTime() : -Infinity;
+    return aT - bT;
+  });
+  else if (sortMode === 'priority') filteredLeads.sort((a,b) => (b.pr?1:0) - (a.pr?1:0));
   else if (sortMode === 'calls')    filteredLeads.sort((a,b) => b.cc - a.cc);
   else if (sortMode === 'company')  filteredLeads.sort((a,b) => a.c.localeCompare(b.c));
   else if (sortMode === 'sales')    filteredLeads.sort((a,b) => (b.sl?b.sl.total:0) - (a.sl?a.sl.total:0));
@@ -912,8 +916,8 @@ function renderTable() {
     const sales   = '';
     const st      = l.st ? (l.st.split(' - ')[1] || l.st) : '—';
     const callBtn = l.ph
-      ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
-        + (l.ph2 ? '<a href="tel:' + l.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none;margin-left:2px" title="' + esc(l.ph2) + '">📞2</a>' : '')
+      ? '<a href="tel:' + l.ph.replace(/\D/g,'') + '" onclick="markContactStarted(' + l.id + ')" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none" title="' + esc(l.ph) + '">📞</a>'
+        + (l.ph2 ? '<a href="tel:' + l.ph2.replace(/\D/g,'') + '" onclick="markContactStarted(' + l.id + ')" class="btn btn-ghost" style="padding:4px 8px;font-size:11px;text-decoration:none;margin-left:2px" title="' + esc(l.ph2) + '">📞2</a>' : '')
       : '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;opacity:.3" disabled>📞</button>';
     const isEngaged = l.mc_engaged && !l.mc_acknowledged;
     const mcBadge = isEngaged ? '<span class="mc-badge">📧 MC</span> ' : '';
@@ -962,6 +966,18 @@ function goPage(p) {
 }
 
 // ── QUICK CALL ────────────────────────────────────────────────
+// Fired when the vendor clicks a tel: link — marks contact immediately so the
+// no_contact filter and idle sort update without waiting for the Intermedia
+// sync. cc and timeline are intentionally left to the Intermedia sync (which
+// dedupes by call_id) to avoid double-counting.
+function markContactStarted(id) {
+  const lead = leads.find(l => l.id === id);
+  if (!lead) return;
+  lead.lc = new Date().toISOString();
+  if (lead.cs === 'novo') lead.cs = 'contatado';
+  applyFilters();
+  saveLeadState(lead);
+}
 async function quickCall(id) {
   const lead = leads.find(l => l.id === id);
   if (!lead) return;
@@ -997,8 +1013,8 @@ async function openModal(id) {
 
   const phoneHtml = lead.ph
     ? '<div style="display:flex;flex-wrap:wrap;gap:8px">'
-      + '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph) + '</a>'
-      + (lead.ph2 ? '<a href="tel:' + lead.ph2.replace(/\D/g,'') + '" class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph2) + '</a>' : '')
+      + '<a href="tel:' + lead.ph.replace(/\D/g,'') + '" onclick="markContactStarted(' + lead.id + ')" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph) + '</a>'
+      + (lead.ph2 ? '<a href="tel:' + lead.ph2.replace(/\D/g,'') + '" onclick="markContactStarted(' + lead.id + ')" class="btn btn-ghost" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;padding:8px 14px;font-size:12px" title="Opens Intermedia">📞 ' + esc(lead.ph2) + '</a>' : '')
       + '</div>'
     : '<span style="color:var(--text3);font-size:12px">No phone number</span>';
 
@@ -1373,15 +1389,52 @@ function setStatus(s) {
   );
   if (old !== s) logActivity(currentLead.id, currentLead.c, 'status_change', old + ' → ' + s);
 }
-async function registerCall() {
+function registerCall() {
   if (!currentLead) return;
+  const cl = document.querySelector('.call-log');
+  if (!cl) return;
+  const summary = 'Total: <strong style="color:var(--accent)">' + (currentLead.cc || 0) + '</strong>'
+    + (currentLead.lc ? ' · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>' : ' · None');
+  cl.innerHTML = summary
+    + '<div style="margin-top:10px">'
+    + '<textarea id="call-note-input" class="modal-textarea" placeholder="Anotação da ligação (opcional)" style="min-height:70px"></textarea>'
+    + '<div style="margin-top:6px;display:flex;gap:8px">'
+    + '<button class="btn btn-primary" onclick="confirmCallLog()">📞 Save call</button>'
+    + '<button class="btn btn-ghost" onclick="cancelCallLog()">Cancel</button>'
+    + '</div></div>';
+  const inp = document.getElementById('call-note-input');
+  if (inp) inp.focus();
+}
+
+async function confirmCallLog() {
+  if (!currentLead) return;
+  const inp  = document.getElementById('call-note-input');
+  const note = (inp?.value || '').trim();
   currentLead.cc = (currentLead.cc || 0) + 1;
   currentLead.lc = new Date().toISOString();
   if (currentLead.cs === 'novo') currentLead.cs = 'contatado';
-  logActivity(currentLead.id, currentLead.c, 'call', 'Call #' + currentLead.cc);
-  showToast('📞 Call logged!');
+  if (!currentLead.tl) currentLead.tl = [];
+  currentLead.tl.push({
+    ts:   currentLead.lc,
+    v:    currentProfile?.name || '—',
+    txt:  '📞 Call #' + currentLead.cc + (note ? ' — ' + note : ''),
+    type: 'call'
+  });
+  logActivity(currentLead.id, currentLead.c, 'call', 'Call #' + currentLead.cc + (note ? ' — ' + note.substring(0, 80) : ''));
+  showToast(note ? '📞 Call + note logged!' : '📞 Call logged!');
+  renderTimeline();
   const cl = document.querySelector('.call-log');
   if (cl) cl.innerHTML = 'Total: <strong style="color:var(--accent)">' + currentLead.cc + '</strong> · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>';
+  applyFilters();
+  saveLeadState(currentLead);
+}
+
+function cancelCallLog() {
+  if (!currentLead) return;
+  const cl = document.querySelector('.call-log');
+  if (!cl) return;
+  cl.innerHTML = 'Total: <strong style="color:var(--accent)">' + (currentLead.cc || 0) + '</strong>'
+    + (currentLead.lc ? ' · Last: <strong>' + new Date(currentLead.lc).toLocaleString('en-US') + '</strong>' : ' · None');
 }
 async function saveModal() {
   if (!currentLead) return;
