@@ -720,14 +720,18 @@ function applyFilters() {
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
     if (activeSpecials.has('has_phone')  && !l.ph)         return false;
-    if (activeSpecials.has('no_contact') && l.lc)          return false;
     if (search) {
       const h = (l.c + ' ' + l.cn + ' ' + l.em).toLowerCase();
       if (!h.includes(search)) return false;
     }
     return true;
   });
-  if      (sortMode === 'priority') filteredLeads.sort((a,b) => (b.pr?1:0) - (a.pr?1:0));
+  if      (activeSpecials.has('no_contact')) filteredLeads.sort((a,b) => {
+    const aT = a.lc ? new Date(a.lc).getTime() : -Infinity;
+    const bT = b.lc ? new Date(b.lc).getTime() : -Infinity;
+    return aT - bT;
+  });
+  else if (sortMode === 'priority') filteredLeads.sort((a,b) => (b.pr?1:0) - (a.pr?1:0));
   else if (sortMode === 'calls')    filteredLeads.sort((a,b) => b.cc - a.cc);
   else if (sortMode === 'company')  filteredLeads.sort((a,b) => a.c.localeCompare(b.c));
   else if (sortMode === 'sales')    filteredLeads.sort((a,b) => (b.sl?b.sl.total:0) - (a.sl?a.sl.total:0));
