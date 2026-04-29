@@ -44,13 +44,26 @@ function chunkMonths(from, to) {
   return ranges;
 }
 
+function extractCallsArray(data) {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.calls))   return data.calls;
+  if (Array.isArray(data.items))   return data.items;
+  if (Array.isArray(data.records)) return data.records;
+  if (Array.isArray(data.results)) return data.results;
+  if (data.data && Array.isArray(data.data.calls))         return data.data.calls;
+  if (data.data && Array.isArray(data.data))               return data.data;
+  if (data.response && Array.isArray(data.response.calls)) return data.response.calls;
+  return [];
+}
+
 async function getCallLogs(token, dateFrom, dateTo) {
   const params = new URLSearchParams({
     dateFrom: dateFrom.toISOString(),
     dateTo:   dateTo.toISOString()
   });
 
-  const url = 'https://api.intermedia.net/analytics/usageHistory?' + params.toString();
+  const url = 'https://api.intermedia.net/analytics/usageHistory/calls?' + params.toString();
   console.log('📞 Fetching:', dateFrom.toISOString(), '→', dateTo.toISOString());
 
   const res = await fetch(url, {
@@ -60,7 +73,7 @@ async function getCallLogs(token, dateFrom, dateTo) {
 
   if (!res.ok) throw new Error('Call logs failed: ' + res.status + ' ' + await res.text());
   const data  = await res.json();
-  const all   = data.calls || data.items || data.records || data.data || data.results || (Array.isArray(data) ? data : []);
+  const all   = extractCallsArray(data);
   const calls = all.filter(c => (c.direction || '').toLowerCase() === 'outbound');
   console.log('  ↳ retrieved', all.length, 'calls,', calls.length, 'outbound');
   return calls;
@@ -117,11 +130,11 @@ function extractUserName(call) {
 }
 
 async function saveCallLog(call, leadId) {
-  const callId    = call.id || call.callId || call.globalCallId;
-  const duration  = call.duration || 0;
-  const direction = call.direction || 'outbound';
+  const callId    = call.id || call.callId || call.uniqueId || call.globalCallId || call.globalId;
+  const duration  = call.duration || call.durationSeconds || call.callDuration || 0;
+  const direction = call.direction || call.callDirection || 'outbound';
   const userName  = extractUserName(call) || 'Unknown';
-  const startTime = call.start || call.startTime || new Date().toISOString();
+  const startTime = call.start || call.startTime || call.startedAt || call.callStart || call.callStartTime || new Date().toISOString();
 
   // Save to intermedia_call_log (all calls, lead_id can be null)
   const logRes = await fetch(SUPABASE_URL + '/rest/v1/intermedia_call_log', {
@@ -209,7 +222,7 @@ async function saveCallLog(call, leadId) {
 async function processCalls(calls, phoneMap, synced) {
   let matched = 0, savedUnmatched = 0, skipped = 0;
   for (const call of calls) {
-    const callId = call.id || call.callId || call.globalCallId;
+    const callId = call.id || call.callId || call.uniqueId || call.globalCallId || call.globalId;
     if (callId && synced.has(String(callId))) { skipped++; continue; }
 
     const customerPhone = call.direction === 'outbound'

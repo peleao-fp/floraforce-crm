@@ -1835,21 +1835,30 @@ async function loadAnalytics() {
     if (l.sl) vendors[name].revenue += (l.sl.total || 0);
   });
 
-  calls.forEach(c => {
-    const lead = leadMap[c.lead_id];
-    if (!lead) return;
-    const name = canonicalName(lead.responsible || lead.r);
-    if (!vendors[name]) vendors[name] = { name, leads:0, calls:0, durTotal:0, contacted:0, converted:0, revenue:0 };
-    vendors[name].calls++;
-    vendors[name].durTotal += (c.duration || 0);
+  // Attribute calls to the actual caller (Intermedia user_name), not the
+  // lead's owner. Also keep calls without a matched lead — those are real
+  // calls the vendor made that the phone-matcher couldn't pair to a CRM lead.
+  const matchingCalls = calls.filter(c => {
+    if (!c.user_name) return false;
+    const callerName = canonicalName(c.user_name);
+    if (filterVendor && callerName !== filterVendor) return false;
+    if ((filterSeg || filterStatus) && !leadMap[c.lead_id]) return false;
+    return true;
   });
 
-  const vList = Object.values(vendors).filter(v => v.leads > 0).sort((a,b) => b.calls - a.calls);
+  matchingCalls.forEach(c => {
+    const callerName = canonicalName(c.user_name);
+    if (!vendors[callerName]) vendors[callerName] = { name: callerName, leads:0, calls:0, durTotal:0, contacted:0, converted:0, revenue:0 };
+    vendors[callerName].calls++;
+    vendors[callerName].durTotal += (c.duration || 0);
+  });
+
+  const vList = Object.values(vendors).filter(v => v.leads > 0 || v.calls > 0).sort((a,b) => b.calls - a.calls);
 
   const totalLeads    = pool.length;
   const totalRevenue  = pool.filter(l=>l.sl).reduce((s,l) => s+(l.sl.total||0), 0);
-  const totalCalls    = calls.length;
-  const totalDur      = calls.reduce((s,c) => s+(c.duration||0), 0);
+  const totalCalls    = matchingCalls.length;
+  const totalDur      = matchingCalls.reduce((s,c) => s+(c.duration||0), 0);
   const avgDur        = totalCalls ? Math.round(totalDur / totalCalls) : 0;
   const totalConverted = pool.filter(l=>l.cv).length;
   const convRate      = totalLeads ? ((totalConverted/totalLeads)*100).toFixed(1) : 0;
@@ -1883,8 +1892,8 @@ async function loadAnalytics() {
   const statusLabels = { novo:'🔵 New', contatado:'🟡 Contacted', proposta:'🟣 Proposal', cliente:'🟢 Client' };
   const maxStatus = Math.max(...Object.values(statusCounts), 1);
 
-  const missed   = calls.filter(c => (c.duration||0) < 5).length;
-  const answered = calls.length - missed;
+  const missed   = matchingCalls.filter(c => (c.duration||0) < 5).length;
+  const answered = matchingCalls.length - missed;
 
   document.getElementById('analytics-charts-2').innerHTML =
     '<div class="chart-card"><div class="chart-title">🔄 Lead Status Funnel</div><div class="bar-chart">'
