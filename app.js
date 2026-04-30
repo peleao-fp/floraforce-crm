@@ -8,7 +8,20 @@ let hasFacebookColumn = true;
 let currentUser = null, currentProfile = null;
 let leads = [], filteredLeads = [];
 let currentPage = 1;
-const PER_PAGE = 50;
+const PER_PAGE_OPTIONS = [25, 50, 100, 200, 500];
+let PER_PAGE = (() => {
+  const saved = parseInt(localStorage.getItem('crm-per-page'), 10);
+  return PER_PAGE_OPTIONS.includes(saved) ? saved : 50;
+})();
+function setPageSize(n) {
+  const v = parseInt(n, 10);
+  if (!PER_PAGE_OPTIONS.includes(v)) return;
+  PER_PAGE = v;
+  localStorage.setItem('crm-per-page', String(v));
+  currentPage = 1;
+  renderTable();
+  renderPagination();
+}
 let currentLead = null, sessionCalls = 0;
 let activeStatus = 'all', activeSpecials = new Set(), sortMode = 'default';
 let idleTimer = null, lastActivity = Date.now();
@@ -664,6 +677,8 @@ function getMyLeads() {
   return leads.filter(l => (l.responsible || l.r) === currentProfile.name);
 }
 function populateFilters() {
+  const psSel = document.getElementById('page-size-select');
+  if (psSel) psSel.value = String(PER_PAGE);
   const pool   = getMyLeads();
   const states = [...new Set(pool.map(l => l.st).filter(Boolean))].sort();
   const sSel   = document.getElementById('filter-state');
@@ -909,7 +924,7 @@ function renderTable() {
   document.getElementById('lc-total').textContent = getMyLeads().length.toLocaleString();
   const tbody = document.getElementById('leads-tbody');
   if (!filteredLeads.length) {
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state"><h3>No leads found</h3></div></td></tr>';
     return;
   }
   tbody.innerHTML = page.map(l => {
@@ -926,6 +941,7 @@ function renderTable() {
       + '<td onclick="event.stopPropagation()"><input type="checkbox" class="lead-checkbox" data-id="' + l.id + '" onchange="onLeadCheckbox(this)" style="cursor:pointer;width:14px;height:14px"></td>'
       + '<td>' + (l.pr ? '<span class="priority-star">⭐</span>' : '') + '</td>'
       + '<td class="td-company">' + mcBadge + esc(l.c) + '<small>' + esc(l.cn || '—') + '</small></td>'
+      + '<td style="font-size:11px;color:var(--text2)">' + esc(l.responsible || l.r || '—') + '</td>'
       + '<td style="font-size:11px">' + st + '</td>'
       + '<td style="font-size:10px;color:var(--text3)">' + (l.ty ? l.ty.split(';')[0] : '—') + '</td>'
       + '<td>' + statusBadge(l.cs) + '</td>'
@@ -3472,6 +3488,13 @@ async function loadSegmentations() {
     segmentations = [...new Set(leads.map(l => l.p).filter(Boolean))].sort();
     await saveSegmentations();
   }
+  // Ensure system-default segmentations are present
+  const defaults = ['restaurants/hotels'];
+  let mutated = false;
+  for (const s of defaults) {
+    if (!segmentations.includes(s)) { segmentations.push(s); mutated = true; }
+  }
+  if (mutated) { segmentations.sort(); await saveSegmentations(); }
 }
 
 async function saveSegmentations() {

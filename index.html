@@ -241,6 +241,15 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
         <div class="leads-toolbar">
           <input type="checkbox" id="select-all-leads" onchange="toggleSelectAll(this)" style="cursor:pointer;width:16px;height:16px" title="Select all">
           <span class="leads-count" style="margin-left:6px">Showing <strong id="lc-shown">0</strong> of <strong id="lc-total">0</strong></span>
+          <label class="leads-count" style="display:inline-flex;align-items:center;gap:4px;margin-left:8px">Rows
+            <select id="page-size-select" class="filter-input filter-select" style="padding:3px 8px;font-size:11px;width:auto" onchange="setPageSize(this.value)">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+          </label>
           <button class="btn btn-primary" style="margin-left:12px;padding:6px 14px;font-size:12px" onclick="openNewLeadModal()">➕ New Lead</button>
           <!-- Bulk action bar (hidden until selection) -->
           <div id="bulk-action-bar" style="display:none;align-items:center;gap:8px;margin-left:12px;padding:4px 12px;background:var(--accent-dim);border:1px solid rgba(74,222,128,.3);border-radius:8px">
@@ -273,6 +282,7 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
               <th style="width:28px"><input type="checkbox" id="select-all-leads-th" onchange="toggleSelectAll(this)" style="cursor:pointer"></th>
               <th style="width:28px">⭐</th>
               <th>Company</th>
+              <th>Owner</th>
               <th>State</th>
               <th>Type</th>
               <th>Status</th>
@@ -682,6 +692,6 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=202604291500"></script>
+<script src="app.js?v=202604301015"></script>
 </body>
 </html>
