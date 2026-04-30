@@ -711,14 +711,41 @@ function toggleSpecial(el, val) {
   currentPage = 1;
   applyFilters();
 }
+function addZipCondition() {
+  const wrap = document.getElementById('zip-conditions');
+  if (!wrap) return;
+  const row = document.createElement('div');
+  row.className = 'zip-cond-row';
+  row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px';
+  row.innerHTML =
+      '<select class="filter-input filter-select zip-cond-mode" onchange="applyFilters()" style="width:90px;flex-shrink:0">'
+    +   '<option value="starts">Starts</option>'
+    +   '<option value="ends">Ends</option>'
+    +   '<option value="contains">Contains</option>'
+    + '</select>'
+    + '<input type="text" class="filter-input zip-cond-value" placeholder="e.g. 331" oninput="applyFilters()" style="flex:1;min-width:0" maxlength="10">'
+    + '<button class="btn btn-ghost" onclick="removeZipCondition(this)" style="padding:2px 8px;font-size:14px;line-height:1;flex-shrink:0" title="Remove">×</button>';
+  wrap.appendChild(row);
+}
+function removeZipCondition(btn) {
+  const row = btn.closest('.zip-cond-row');
+  if (!row) return;
+  row.remove();
+  applyFilters();
+}
 function applyFilters() {
   const search   = document.getElementById('search-input')?.value.toLowerCase() || '';
   const pipeline = document.getElementById('filter-segmentation')?.value || '';
   const type     = document.getElementById('filter-type')?.value || '';
   const state    = document.getElementById('filter-state')?.value || '';
   const owner    = document.getElementById('filter-owner')?.value || '';
-  const zipVal   = (document.getElementById('filter-zip')?.value || '').trim();
-  const zipMode  = document.getElementById('filter-zip-mode')?.value || 'starts';
+  const zipLogic = document.getElementById('filter-zip-logic')?.value || 'and';
+  const zipConds = [...document.querySelectorAll('#zip-conditions .zip-cond-row')]
+    .map(r => ({
+      mode: r.querySelector('.zip-cond-mode')?.value || 'starts',
+      val:  (r.querySelector('.zip-cond-value')?.value || '').trim()
+    }))
+    .filter(c => c.val);
   const pool     = getMyLeads();
   filteredLeads  = pool.filter(l => {
     if (activeStatus !== 'all' && l.cs !== activeStatus) return false;
@@ -726,11 +753,14 @@ function applyFilters() {
     if (type     && !(l.ty || '').includes(type))         return false;
     if (state    && l.st !== state)                        return false;
     if (owner    && (l.responsible || l.r) !== owner)     return false;
-    if (zipVal) {
+    if (zipConds.length) {
       const lz = (l.zip || '').trim();
-      if (zipMode === 'starts'   && !lz.startsWith(zipVal)) return false;
-      if (zipMode === 'ends'     && !lz.endsWith(zipVal))   return false;
-      if (zipMode === 'contains' && !lz.includes(zipVal))   return false;
+      const test = c =>
+        c.mode === 'starts'   ? lz.startsWith(c.val) :
+        c.mode === 'ends'     ? lz.endsWith(c.val)   :
+        c.mode === 'contains' ? lz.includes(c.val)   : true;
+      const ok = zipLogic === 'or' ? zipConds.some(test) : zipConds.every(test);
+      if (!ok) return false;
     }
     if (activeSpecials.has('priority')   && !l.pr)         return false;
     if (activeSpecials.has('has_sales')  && !l.sl)         return false;
