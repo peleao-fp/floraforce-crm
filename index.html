@@ -273,7 +273,7 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
             <button class="btn btn-ghost" id="btn-highlights" onclick="toggleHighlights(this)" title="Show leads that engaged with email campaigns">✨ Highlights</button>
             <button class="btn btn-ghost" onclick="sortBy('company')">🔤 A-Z</button>
             <button class="btn btn-ghost" onclick="sortBy('idle')">💤 No Contact</button>
-            <button class="btn btn-ghost" onclick="exportCSV()" title="Export leads to CSV">📥 CSV</button>
+            <button class="btn btn-ghost" onclick="exportCSV()" title="Export leads to XLSX">📥 XLSX</button>
           </div>
         </div>
         <div class="leads-table-wrap">
@@ -692,6 +692,7 @@ tr.mc-engaged:hover { background: rgba(234,179,8,.14) !important; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="app.js?v=202604301030"></script>
 </body>
 </html>

@@ -1977,7 +1977,7 @@ async function loadAnalytics() {
   }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">No data</td></tr>';
 }
 
-// ── CSV EXPORT ────────────────────────────────────────────────
+// ── XLSX EXPORT ───────────────────────────────────────────────
 function exportCSV() {
   const isAdmin = currentProfile?.role === 'admin';
   const pool = isAdmin ? leads : getMyLeads();
@@ -2008,17 +2008,15 @@ function exportCSV() {
       Array.isArray(l.mkt_tag) ? l.mkt_tag.join('; ') : (l.mkt_tag || '')
     ]);
   });
-  // Use semicolon as separator — safer for company names that contain commas
-  const esc2 = v => '"' + String(v).replace(/"/g, '""') + '"';
-  const csv  = '\uFEFF' + rows.map(r => r.map(esc2).join(';')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'floraforce_leads_' + new Date().toISOString().substring(0,10) + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('📥 CSV exported — ' + pool.length + ' leads');
+  if (typeof XLSX === 'undefined') {
+    showToast('⚠️ XLSX library not loaded');
+    return;
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+  XLSX.writeFile(wb, 'floraforce_leads_' + new Date().toISOString().substring(0,10) + '.xlsx');
+  showToast('📥 XLSX exported — ' + pool.length + ' leads');
 }
 
 // ── MKT PANEL ─────────────────────────────────────────────────
@@ -3593,7 +3591,7 @@ const ALL_PERMISSIONS = [
   { key: 'create_leads',      label: 'Create Leads',        group: '👥 Leads',    desc: 'Create new leads' },
   { key: 'delete_leads',      label: 'Delete Leads',        group: '👥 Leads',    desc: 'Delete leads permanently' },
   // Data
-  { key: 'export_csv',        label: 'Export CSV',          group: '📊 Data',     desc: 'Download leads as CSV' },
+  { key: 'export_csv',        label: 'Export XLSX',         group: '📊 Data',     desc: 'Download leads as XLSX' },
   { key: 'bulk_import',       label: 'Bulk Import',         group: '📊 Data',     desc: 'Update leads via CSV upload' },
   { key: 'create_quotes',     label: 'Create Quotes',       group: '📊 Data',     desc: 'Create and download quotes' },
   // Panels
